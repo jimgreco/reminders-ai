@@ -5,8 +5,7 @@ import UserNotifications
 
 enum Route: Hashable {
     case list(ReminderFilter)
-    case detail(String)
-    /// The assistant thread of the reminder with this external identifier.
+    /// The reminder with this external identifier: its fields and its assistant conversation.
     case thread(String)
 }
 

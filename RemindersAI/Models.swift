@@ -167,6 +167,15 @@ enum DueDate {
         return components
     }
 
+    /// The due date a date picker and its two switches describe.
+    static func components(hasDate: Bool, hasTime: Bool, date: Date) -> DateComponents? {
+        guard hasDate else { return nil }
+        let units: Set<Calendar.Component> = hasTime ? [.year, .month, .day, .hour, .minute] : [.year, .month, .day]
+        var components = Calendar.current.dateComponents(units, from: date)
+        components.calendar = Calendar.current
+        return components
+    }
+
     static func string(from components: DateComponents?) -> String {
         guard let c = components, let year = c.year, let month = c.month, let day = c.day else { return "" }
         let date = String(format: "%04d-%02d-%02d", year, month, day)
