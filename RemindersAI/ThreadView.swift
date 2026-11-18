@@ -5,7 +5,13 @@ import SwiftUI
 /// assistant's conversation about it underneath. Opening a reminder lands here, ready to
 /// start chatting or to pick up where the conversation left off.
 struct ThreadView: View {
-    let reminderId: String
+    /// The reminder's external id. It can change while the page is open: EventKit
+    /// may give a reminder a new id when it moves to another list.
+    @State private var reminderId: String
+
+    init(reminderId: String) {
+        _reminderId = State(initialValue: reminderId)
+    }
 
     @Environment(AppModel.self) private var model
     @Environment(Session.self) private var session
@@ -59,7 +65,7 @@ struct ThreadView: View {
                         }
                         .padding(.top, 4)
                     }
-                    if let error = assistant.lastError ?? reminders.lastError {
+                    if let error = assistant.lastError {
                         Text(error).font(.footnote).foregroundStyle(.red)
                     }
                     Color.clear.frame(height: 1).id("end")
@@ -188,7 +194,14 @@ struct ThreadView: View {
                             .focused($focus, equals: .notes)
                     }
                 }
-                ReminderDetailsCard(item: item)
+                ReminderDetailsCard(item: item) { movedTo in
+                    let old = reminderId
+                    reminderId = movedTo
+                    Task { await assistant.move(old, to: movedTo, session: session) }
+                }
+                if let error = reminders.lastError {
+                    Text(error).font(.footnote).foregroundStyle(.red)
+                }
             } else {
                 Text(detail?.title ?? "Reminder").font(.title3.bold())
                 Text("This reminder isn't on this iPhone any more.").font(.subheadline).foregroundStyle(.secondary)
