@@ -61,6 +61,9 @@ struct ThreadView: View {
                     Color.clear.frame(height: 1).id("end")
                 }
                 .padding()
+                // A readable column in a wide Mac window.
+                .frame(maxWidth: 760)
+                .frame(maxWidth: .infinity)
             }
             .scrollDismissesKeyboard(.interactively)
             .onChange(of: detail?.messages.count) { old, _ in

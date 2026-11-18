@@ -100,6 +100,18 @@ struct RemindersAIApp: App {
     }
 }
 
+extension ToolbarItemPlacement {
+    /// Where New Reminder and Add List go: along the bottom on iPhone, as in
+    /// Reminders; in the window's toolbar on the Mac, which has no bottom bar.
+    static var addBar: ToolbarItemPlacement {
+        #if targetEnvironment(macCatalyst)
+        .primaryAction
+        #else
+        .bottomBar
+        #endif
+    }
+}
+
 enum GoogleConfig {
     /// The iOS OAuth client id, or nil while project.yml still has its placeholder.
     static var clientID: String? {

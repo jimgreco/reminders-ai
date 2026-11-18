@@ -32,7 +32,7 @@ struct HomeView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Settings", systemImage: "gearshape") { showingSettings = true }
                 }
-                ToolbarItemGroup(placement: .bottomBar) {
+                ToolbarItemGroup(placement: .addBar) {
                     Button {
                         showingNewReminder = true
                     } label: {

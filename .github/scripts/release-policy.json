@@ -29,6 +29,29 @@
       "push": "production"
     }
   },
+  "macProfiles": {
+    "app": {
+      "uuid": "2fd72395-e233-4988-a084-0c319938bb3f",
+      "name": "Reminders AI Mac Catalyst App Store",
+      "bundleId": "com.jimgreco.remindersai",
+      "groups": [],
+      "appleSignin": [
+        "Default"
+      ],
+      "push": "production",
+      "signedGroups": [],
+      "signedRequired": {
+        "com.apple.security.app-sandbox": true,
+        "com.apple.security.network.client": true,
+        "com.apple.security.personal-information.calendars": true
+      }
+    }
+  },
+  "macInstaller": {
+    "identityPrefix": "3rd Party Mac Developer Installer: ",
+    "alternateIdentityPrefix": "Mac Installer Distribution: ",
+    "teamSuffix": " (V6JPQCD336)"
+  },
   "marketingVersion": "1.0",
   "buildAudience": "APP_STORE_ELIGIBLE",
   "apiOrigin": "https://tasks.jim-greco.com",
