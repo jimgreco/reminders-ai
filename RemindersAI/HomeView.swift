@@ -355,7 +355,7 @@ struct SettingsView: View {
                     LabeledContent("Version", value: Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "")
                     LabeledContent("Build", value: Bundle.main.object(forInfoDictionaryKey: "GitCommitHash") as? String ?? "")
                 } footer: {
-                    Text("Your tasks live in Apple Reminders. When you ask the assistant to work on one, that reminder's title, notes and dates are sent to the server and to Claude.")
+                    Text("Your tasks live in Apple Reminders. When you ask the assistant to work on one, that reminder's title, notes and dates, and any photos you add, are sent to the server and to Claude.")
                 }
             }
             .navigationTitle("Settings")

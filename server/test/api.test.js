@@ -107,7 +107,8 @@ async function start(store, env = baseEnv()) {
     const r = await call("POST", "/auth/apple", { body: { identityToken: JSON.stringify({ sub: `sub-${email}`, email, email_verified: true }) } });
     return r.body;
   };
-  return { call, signIn, agents, assistant, pushes, config, close: () => new Promise((r) => server.close(r)) };
+  const raw = (path, token) => fetch(base + path, { headers: token ? { authorization: `Bearer ${token}` } : {} });
+  return { call, raw, signIn, agents, assistant, pushes, config, close: () => new Promise((r) => server.close(r)) };
 }
 
 const REMINDER = { title: "Renew passport", notes: "expires in March", list: "Personal", due: "2026-12-01", priority: "high", timeZone: "America/New_York" };
@@ -304,6 +305,52 @@ function suite(name, makeStore) {
       assert.match(t.messages.at(-1).text, /spending limit/);
       await ask("Keep going");
       assert.equal(app.agents.created.length, 3);
+    });
+
+    test("photos reach the agent as images, are listed without their data, and are served only to the owner", async () => {
+      const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(64, 7)]);
+      const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47]), Buffer.alloc(32, 1)]);
+      const path = "/api/threads/photo-reminder/messages";
+      const sent = await app.call("POST", path, {
+        token,
+        body: {
+          text: "What size filter is this?", reminder: { ...REMINDER, title: "Replace furnace filter" },
+          images: [{ mediaType: "image/jpeg", data: jpeg.toString("base64") }, { mediaType: "image/png", data: png.toString("base64") }]
+        }
+      });
+      assert.equal(sent.status, 200);
+      const mine = sent.body.messages.find((m) => m.role === "user");
+      assert.equal(mine.attachments.length, 2);
+      assert.deepEqual(Object.keys(mine.attachments[0]).sort(), ["id", "mediaType"], "no image data in the thread");
+
+      const session = [...app.agents.sessions.values()].at(-1);
+      const content = session.sent.at(-1).content;
+      assert.equal(content[0].type, "text");
+      assert.match(content[0].text, /What size filter is this\?/);
+      assert.deepEqual(content.slice(1).map((c) => [c.type, c.source.type, c.source.media_type]),
+        [["image", "base64", "image/jpeg"], ["image", "base64", "image/png"]]);
+      assert.equal(content[1].source.data, jpeg.toString("base64"));
+
+      const fetched = await app.raw(`/api/attachments/${mine.attachments[0].id}`, token);
+      assert.equal(fetched.status, 200);
+      assert.equal(fetched.headers.get("content-type"), "image/jpeg");
+      assert.deepEqual(Buffer.from(await fetched.arrayBuffer()), jpeg);
+      assert.equal((await app.raw(`/api/attachments/${mine.attachments[0].id}`)).status, 401);
+      const stranger = await store.upsertUserByIdentity({ provider: "dev", subject: "x", email: "x@example.com", emailVerified: true });
+      assert.equal(await store.getAttachment(stranger.id, mine.attachments[0].id), null, "another user's photo is not found");
+      assert.equal((await app.raw("/api/attachments/00000000-0000-0000-0000-000000000000", token)).status, 404);
+
+      const photoOnly = await app.call("POST", path, {
+        token, body: { text: "", reminder: REMINDER, images: [{ mediaType: "image/png", data: png.toString("base64") }] }
+      });
+      assert.equal(photoOnly.status, 200);
+      assert.match(JSON.stringify(session.sent.at(-1).content[0]), /sent a photo/);
+
+      const bad = (images) => app.call("POST", path, { token, body: { text: "x", reminder: REMINDER, images } });
+      assert.equal((await bad([{ mediaType: "image/jpeg", data: png.toString("base64") }])).status, 400, "bytes must match the type");
+      assert.equal((await bad([{ mediaType: "image/svg+xml", data: png.toString("base64") }])).status, 400);
+      assert.equal((await bad(Array(5).fill({ mediaType: "image/png", data: png.toString("base64") }))).status, 400);
+      await app.call("DELETE", "/api/threads/photo-reminder", { token });
     });
 
     test("bad input is rejected; deleting a thread removes it", async () => {

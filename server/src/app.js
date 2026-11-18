@@ -5,7 +5,14 @@ import { OAuth2Client } from "google-auth-library";
 const ACCESS_TTL_MS = 15 * 60_000;
 const REFRESH_TTL_MS = 120 * 24 * 60 * 60_000;
 const MAX_BODY_BYTES = 256 * 1024;
-export const LIMITS = { messageChars: 8000, titleChars: 500, notesChars: 20_000 };
+export const LIMITS = {
+  messageChars: 8000, titleChars: 500, notesChars: 20_000,
+  // Photos on one message. The app sends JPEGs of at most 1568 px, well under this.
+  images: 4, imageBytes: 3 * 1024 * 1024
+};
+// A message with photos: four images as base64, plus the text and reminder.
+const MAX_MESSAGE_BYTES = Math.ceil(LIMITS.images * LIMITS.imageBytes * 4 / 3) + MAX_BODY_BYTES;
+const IMAGE_TYPES = { "image/jpeg": [0xff, 0xd8, 0xff], "image/png": [0x89, 0x50, 0x4e, 0x47], "image/gif": [0x47, 0x49, 0x46], "image/webp": [0x52, 0x49, 0x46, 0x46] };
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const PRIORITIES = ["none", "low", "medium", "high"];
@@ -74,12 +81,12 @@ class HttpError extends Error {
   }
 }
 
-async function readJSON(request) {
+async function readJSON(request, maxBytes = MAX_BODY_BYTES) {
   const chunks = [];
   let size = 0;
   for await (const chunk of request) {
     size += chunk.length;
-    if (size > MAX_BODY_BYTES) throw new HttpError(413, "body too large");
+    if (size > maxBytes) throw new HttpError(413, "body too large");
     chunks.push(chunk);
   }
   if (!size) return {};
@@ -130,8 +137,32 @@ function threadSummary(thread) {
   };
 }
 
+// Photos sent with a message: an image type the model reads, real image bytes
+// of that type, and a size cap.
+export function validateImages(value) {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.length > LIMITS.images) {
+    throw new HttpError(400, `images must be a list of at most ${LIMITS.images}`);
+  }
+  return value.map((image, index) => {
+    const mediaType = image?.mediaType;
+    const magic = IMAGE_TYPES[mediaType];
+    if (!magic || typeof image.data !== "string" || !/^[A-Za-z0-9+/]+={0,2}$/.test(image.data)) {
+      throw new HttpError(400, `images[${index}] must be a JPEG, PNG, GIF or WebP in base64`);
+    }
+    const bytes = Buffer.from(image.data, "base64");
+    if (bytes.length > LIMITS.imageBytes) throw new HttpError(413, `images[${index}] is larger than 3 MB`);
+    if (!magic.every((b, i) => bytes[i] === b)) throw new HttpError(400, `images[${index}] is not a ${mediaType}`);
+    return { id: crypto.randomUUID(), mediaType, data: image.data };
+  });
+}
+
 function publicMessage(m) {
-  return { id: m.id, role: m.role, text: m.text, options: m.options ?? null, createdAt: m.createdAt };
+  return {
+    id: m.id, role: m.role, text: m.text, options: m.options ?? null,
+    attachments: m.attachments?.length ? m.attachments.map(({ id, mediaType }) => ({ id, mediaType })) : null,
+    createdAt: m.createdAt
+  };
 }
 
 export function createApp({ store, config, assistant, verifyAppleToken, verifyGoogleToken, now = () => new Date() }) {
@@ -354,6 +385,19 @@ export function createApp({ store, config, assistant, verifyAppleToken, verifyGo
       return send(response, 200, { ok: true });
     }
 
+    const attachmentMatch = path.match(/^\/api\/attachments\/([0-9a-f-]{36})$/i);
+    if (method === "GET" && attachmentMatch) {
+      const attachment = await store.getAttachment(user.id, attachmentMatch[1].toLowerCase());
+      if (!attachment) return send(response, 404, { error: "not found" });
+      response.writeHead(200, {
+        "content-type": attachment.mediaType,
+        "cache-control": "private, max-age=31536000, immutable",
+        "x-content-type-options": "nosniff",
+        "content-security-policy": "default-src 'none'"
+      });
+      return response.end(Buffer.from(attachment.data, "base64"));
+    }
+
     const threadMatch = path.match(/^\/api\/threads\/([^/]+)(\/(messages|stop|read))?$/);
     if (threadMatch) {
       let reminderId;
@@ -367,13 +411,14 @@ export function createApp({ store, config, assistant, verifyAppleToken, verifyGo
 
       if (method === "POST" && action === "messages") {
         if (!assistant.configured) return send(response, 503, { error: "The assistant isn't set up on the server yet." });
-        const body = await readJSON(request);
+        const body = await readJSON(request, MAX_MESSAGE_BYTES);
         const text = typeof body.text === "string" ? body.text.trim() : "";
-        if (!text || text.length > LIMITS.messageChars) {
-          throw new HttpError(400, `text is required, at most ${LIMITS.messageChars} characters`);
+        const images = validateImages(body.images);
+        if ((!text && !images.length) || text.length > LIMITS.messageChars) {
+          throw new HttpError(400, `text or a photo is required; text at most ${LIMITS.messageChars} characters`);
         }
         const reminder = validateReminder(body.reminder);
-        const thread = await assistant.post(user, reminderId, text, reminder);
+        const thread = await assistant.post(user, reminderId, text, reminder, images);
         return send(response, 200, await threadBody(thread));
       }
 

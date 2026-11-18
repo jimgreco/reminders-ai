@@ -44,6 +44,8 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
+	<key>NSCameraUsageDescription</key>
+	<string>Take a photo to show the assistant, such as a label, a receipt or something that needs fixing.</string>
 	<key>NSRemindersFullAccessUsageDescription</key>
 	<string>Task Sidekick shows and edits your Apple Reminders. A reminder's details are sent to the assistant only when you ask it to work on that reminder.</string>
 	<key>UIApplicationSceneManifest</key>

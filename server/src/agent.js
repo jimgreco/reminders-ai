@@ -157,10 +157,17 @@ function describeReminder(reminder) {
 
 const RECAP_CHARS = 12_000;
 
+function imageBlocks(images) {
+  return images.map((image) => ({ type: "image", source: { type: "base64", media_type: image.mediaType, data: image.data } }));
+}
+
 function recap(messages) {
   const lines = messages
     .filter((m) => m.role === "user" || m.role === "assistant" || m.role === "question")
-    .map((m) => `${m.role === "user" ? "Person" : "You"}: ${m.text}`);
+    .map((m) => {
+      const photos = m.attachments?.length ? ` [${m.attachments.length} photo${m.attachments.length > 1 ? "s" : ""}, not shown again]` : "";
+      return `${m.role === "user" ? "Person" : "You"}: ${m.text}${photos}`;
+    });
   if (!lines.length) return "";
   let body = lines.join("\n\n");
   if (body.length > RECAP_CHARS) body = `…${body.slice(-RECAP_CHARS)}`;
@@ -208,19 +215,20 @@ export class Assistant {
     return session.id;
   }
 
-  async #sendMessage(sessionId, body) {
+  async #sendMessage(sessionId, body, images = []) {
     await this.client.beta.sessions.events.send(sessionId, {
-      events: [{ type: "user.message", content: [{ type: "text", text: body }] }]
+      events: [{ type: "user.message", content: [{ type: "text", text: body }, ...imageBlocks(images)] }]
     });
   }
 
   // Records what the person wrote and hands it to the agent: as the answer to
   // a pending question, as the next message in the reminder's session, or as
   // the first message of a new session.
-  async post(user, reminderId, message, reminder) {
+  async post(user, reminderId, message, reminder, images = []) {
     let thread = await this.store.createThread(user.id, reminderId, reminder.title);
     const earlier = await this.store.listMessages(thread.id);
-    await this.store.addMessage(thread.id, "user", message);
+    await this.store.addMessage(thread.id, "user", message, null, images.length ? images : null);
+    const said = message || (images.length === 1 ? "(sent a photo)" : `(sent ${images.length} photos)`);
     try {
       let sessionId = thread.sessionId;
       const answering = thread.status === "needs_input" && thread.pendingToolUseId && sessionId;
@@ -229,15 +237,15 @@ export class Assistant {
           events: [{
             type: "user.custom_tool_result",
             custom_tool_use_id: thread.pendingToolUseId,
-            content: [{ type: "text", text: message }]
+            content: [{ type: "text", text: said }, ...imageBlocks(images)]
           }]
         });
       } else {
-        const body = `${describeReminder(reminder)}\n\n${message}`;
+        const body = `${describeReminder(reminder)}\n\n${said}`;
         let sent = false;
         if (sessionId) {
           try {
-            await this.#sendMessage(sessionId, body);
+            await this.#sendMessage(sessionId, body, images);
             sent = true;
           } catch (error) {
             // The session can no longer take messages (ended, at its spend
@@ -247,7 +255,7 @@ export class Assistant {
         }
         if (!sent) {
           sessionId = await this.#createSession(thread);
-          await this.#sendMessage(sessionId, `${recap(earlier)}${body}`);
+          await this.#sendMessage(sessionId, `${recap(earlier)}${body}`, images);
         }
       }
       thread = await this.store.updateThread(thread.id, {

@@ -1,3 +1,4 @@
+import PhotosUI
 import SwiftUI
 
 /// One reminder: its title, notes and details, editable in place, with the
@@ -11,6 +12,10 @@ struct ThreadView: View {
     @Environment(RemindersStore.self) private var reminders
     @Environment(AssistantStore.self) private var assistant
     @State private var draft = ""
+    @State private var photos: [PendingPhoto] = []
+    @State private var pickedItems: [PhotosPickerItem] = []
+    @State private var choosingPhotos = false
+    @State private var takingPhoto = false
     @State private var title = ""
     @State private var notes = ""
     @State private var loadedFrom: ReminderItem?
@@ -227,32 +232,121 @@ struct ThreadView: View {
         .disabled(item == nil)
     }
 
+    private static let maxPhotos = 4
+
     private var inputBar: some View {
-        HStack(alignment: .bottom, spacing: 8) {
-            TextField(detail?.openQuestion == nil ? "Ask the assistant" : "Your answer", text: $draft, axis: .vertical)
-                .lineLimit(1...5)
-                .focused($focus, equals: .message)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 9)
-                .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20))
-            Button {
-                send(draft)
-            } label: {
-                Image(systemName: "arrow.up.circle.fill").font(.system(size: 32))
+        VStack(alignment: .leading, spacing: 8) {
+            if !photos.isEmpty { pendingPhotos }
+            HStack(alignment: .bottom, spacing: 8) {
+                photoButton
+                TextField(detail?.openQuestion == nil ? "Ask the assistant" : "Your answer", text: $draft, axis: .vertical)
+                    .lineLimit(1...5)
+                    .focused($focus, equals: .message)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 9)
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 20))
+                Button {
+                    send(draft)
+                } label: {
+                    Image(systemName: "arrow.up.circle.fill").font(.system(size: 32))
+                }
+                .tint(.purple)
+                .disabled((draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty && photos.isEmpty) || isSending || item == nil)
+                .accessibilityLabel("Send")
             }
-            .tint(.purple)
-            .disabled(draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty || isSending || item == nil)
-            .accessibilityLabel("Send")
         }
         .padding(.horizontal)
         .padding(.vertical, 8)
         .background(.bar)
+        .photosPicker(isPresented: $choosingPhotos, selection: $pickedItems,
+                      maxSelectionCount: max(1, Self.maxPhotos - photos.count), matching: .images)
+        .onChange(of: pickedItems) { _, items in
+            guard !items.isEmpty else { return }
+            pickedItems = []
+            Task { await addPicked(items) }
+        }
+        .fullScreenCover(isPresented: $takingPhoto) {
+            CameraPicker { image in
+                Task {
+                    let photo = await Task.detached { PhotoPrep.prepare(image) }.value
+                    if let photo, photos.count < Self.maxPhotos { photos.append(photo) }
+                }
+            }
+            .ignoresSafeArea()
+        }
+    }
+
+    /// Add a photo from the library or, on iPhone, the camera.
+    @ViewBuilder
+    private var photoButton: some View {
+        let full = photos.count >= Self.maxPhotos
+        Group {
+            if CameraPicker.isAvailable {
+                Menu {
+                    Button("Take Photo", systemImage: "camera") { takingPhoto = true }
+                    Button("Photo Library", systemImage: "photo.on.rectangle") { choosingPhotos = true }
+                } label: {
+                    Image(systemName: "plus.circle.fill").font(.system(size: 30))
+                }
+            } else {
+                Button {
+                    choosingPhotos = true
+                } label: {
+                    Image(systemName: "photo.badge.plus").font(.system(size: 24))
+                }
+            }
+        }
+        .tint(.secondary)
+        .disabled(full || isSending || item == nil)
+        .accessibilityLabel("Add Photo")
+    }
+
+    private var pendingPhotos: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(photos) { photo in
+                    Image(uiImage: photo.thumbnail)
+                        .resizable()
+                        .scaledToFill()
+                        .frame(width: 64, height: 64)
+                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                        .overlay(alignment: .topTrailing) {
+                            Button {
+                                photos.removeAll { $0.id == photo.id }
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .symbolRenderingMode(.palette)
+                                    .foregroundStyle(.white, .black.opacity(0.6))
+                                    .font(.title3)
+                            }
+                            .buttonStyle(.plain)
+                            .padding(3)
+                            .accessibilityLabel("Remove Photo")
+                        }
+                }
+            }
+        }
+    }
+
+    private func addPicked(_ items: [PhotosPickerItem]) async {
+        for picked in items {
+            guard photos.count < Self.maxPhotos,
+                  let data = try? await picked.loadTransferable(type: Data.self) else { continue }
+            let photo = await Task.detached { PhotoPrep.prepare(data) }.value
+            if let photo { photos.append(photo) }
+        }
     }
 
     private func send(_ text: String) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty, !isSending, let item else { return }
-        if trimmed == draft.trimmingCharacters(in: .whitespacesAndNewlines) { draft = "" }
+        // Option buttons answer a question with text only; the message box also sends its photos.
+        let fromBox = trimmed == draft.trimmingCharacters(in: .whitespacesAndNewlines)
+        let attached = fromBox ? photos : []
+        guard !trimmed.isEmpty || !attached.isEmpty, !isSending, let item else { return }
+        if fromBox {
+            draft = ""
+            photos = []
+        }
         Task {
             // The assistant should see the title and notes as they are on screen.
             if fieldsDirty {
@@ -260,7 +354,12 @@ struct ThreadView: View {
             }
             let current = reminders.item(externalId: reminderId) ?? item
             loadFields(current)
-            await assistant.send(trimmed, about: current, session: session)
+            let sent = await assistant.send(trimmed, photos: attached.map(\.jpeg), about: current, session: session)
+            if !sent && fromBox {
+                // Keep what was typed and attached so it can be sent again.
+                if draft.isEmpty { draft = trimmed }
+                if photos.isEmpty { photos = attached }
+            }
         }
     }
 }
@@ -273,13 +372,26 @@ private struct MessageView: View {
     var body: some View {
         switch message.role {
         case .user:
-            Text(message.text)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 9)
-                .foregroundStyle(.white)
-                .background(.purple, in: RoundedRectangle(cornerRadius: 18))
-                .frame(maxWidth: .infinity, alignment: .trailing)
-                .padding(.leading, 40)
+            VStack(alignment: .trailing, spacing: 6) {
+                if let attachments = message.attachments, !attachments.isEmpty {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(attachments) { AttachmentThumbnail(attachment: $0) }
+                        }
+                    }
+                    .defaultScrollAnchor(.trailing)
+                    .frame(height: 120)
+                }
+                if !message.text.isEmpty {
+                    Text(message.text)
+                        .padding(.horizontal, 14)
+                        .padding(.vertical, 9)
+                        .foregroundStyle(.white)
+                        .background(.purple, in: RoundedRectangle(cornerRadius: 18))
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .trailing)
+            .padding(.leading, 40)
         case .assistant:
             SelectableText(markdown: message.text)
                 .frame(maxWidth: .infinity, alignment: .leading)
