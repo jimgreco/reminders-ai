@@ -15,6 +15,7 @@ function baseEnv(extra = {}) {
   return {
     SESSION_SECRET: "x".repeat(40),
     APPLE_BUNDLE_ID: "com.jimgreco.remindersai",
+    GOOGLE_CLIENT_ID: "test.apps.googleusercontent.com",
     ALLOWED_EMAILS: OWNER,
     AGENT_ID: "agent_test",
     AGENT_ENVIRONMENT_ID: "env_test",
@@ -87,7 +88,7 @@ async function start(store, env = baseEnv()) {
   const pushes = [];
   const push = { notify: async (userId, message) => { pushes.push(message); } };
   const assistant = new Assistant({ store, client: agents, config, push, log: quiet });
-  const server = http.createServer(createApp({ store, config, assistant, verifyAppleToken: fakeApple }));
+  const server = http.createServer(createApp({ store, config, assistant, verifyAppleToken: fakeApple, verifyGoogleToken: fakeApple }));
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
   const call = async (method, path, { body, token } = {}) => {
@@ -136,6 +137,26 @@ function suite(name, makeStore) {
       const r = await app.call("GET", "/health");
       assert.equal(r.status, 200);
       assert.deepEqual(r.body, { ok: true, status: "ok", db: true, build: "dev" });
+    });
+
+    test("Google sign-in reaches the same account as Apple via the verified email", async () => {
+      const apple = await app.signIn();
+      const google = await app.call("POST", "/auth/google", {
+        body: { idToken: JSON.stringify({ sub: "google-owner", email: OWNER.toUpperCase(), email_verified: true }) }
+      });
+      assert.equal(google.status, 200);
+      assert.equal(google.body.user.id, apple.user.id);
+      assert.equal((await app.call("GET", "/api/sync", { token: google.body.accessToken })).status, 200);
+      const stranger = await app.call("POST", "/auth/google", {
+        body: { idToken: JSON.stringify({ sub: "google-x", email: "someone@else.com", email_verified: true }) }
+      });
+      assert.equal(stranger.status, 403);
+      const unverified = await app.call("POST", "/auth/google", {
+        body: { idToken: JSON.stringify({ sub: "google-y", email: OWNER, email_verified: false }) }
+      });
+      assert.equal(unverified.status, 403, "an unverified email is neither allowed nor linked");
+      const forged = await app.call("POST", "/auth/google", { body: { idToken: JSON.stringify({ invalid: true }) } });
+      assert.equal(forged.status, 401);
     });
 
     test("only the owner can sign in, and the API needs a session", async () => {
@@ -331,6 +352,13 @@ describe("configuration", () => {
     assert.throws(() => loadConfig({ ...baseEnv(), SESSION_SECRET: "short" }), /SESSION_SECRET/);
     assert.throws(() => loadConfig({ ...baseEnv(), SESSION_BUDGET_CENTS: "1.5" }), /SESSION_BUDGET_CENTS/);
     assert.equal(loadConfig({ ...baseEnv(), SESSION_BUDGET_CENTS: "0" }).sessionBudgetCents, 0);
+  });
+
+  test("Google sign-in is off until a client id is set", async () => {
+    const app = await start(new MemoryStore(), baseEnv({ GOOGLE_CLIENT_ID: "" }));
+    const r = await app.call("POST", "/auth/google", { body: { idToken: "{}" } });
+    assert.equal(r.status, 503);
+    await app.close();
   });
 
   test("without agent ids the assistant is off and says so", async () => {

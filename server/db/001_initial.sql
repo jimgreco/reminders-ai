@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS rai_users (
 );
 
 CREATE TABLE IF NOT EXISTS rai_identities (
-  provider text NOT NULL CHECK (provider IN ('apple', 'dev')),
+  provider text NOT NULL CHECK (provider IN ('apple', 'google', 'dev')),
   subject text NOT NULL CHECK (length(subject) BETWEEN 1 AND 255),
   user_id uuid NOT NULL REFERENCES rai_users(id) ON DELETE CASCADE,
   created_at timestamptz NOT NULL DEFAULT now(),
