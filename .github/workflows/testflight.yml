@@ -74,3 +74,48 @@ jobs:
           GOOGLE_REVERSED_CLIENT_ID=@ENV:GOOGLE_REVERSED_CLIENT_ID@
     - uses: jimgreco/release-tools/ios/cleanup@bfd9d14bb12907b74bceaa28b7c0382fb3549ea6
       if: always()
+
+  mac:
+    # Same app record, certificate, audience and Git-count build as iOS, on the
+    # MAC_OS train: the iOS target built with Mac Catalyst.
+    name: Mac Catalyst
+    runs-on: macos-latest
+    timeout-minutes: 45
+    environment: production
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@v5
+      with:
+        fetch-depth: 0
+    - uses: actions/setup-node@v5
+      with:
+        node-version: 22
+    - uses: jimgreco/release-tools/ios/prepare@bfd9d14bb12907b74bceaa28b7c0382fb3549ea6
+      with:
+        policy: .github/scripts/release-policy.json
+        platform: mac
+        app-store-connect-key-id: ${{ secrets.APP_STORE_CONNECT_KEY_ID }}
+        app-store-connect-issuer-id: ${{ secrets.APP_STORE_CONNECT_ISSUER_ID }}
+        app-store-connect-private-key: ${{ secrets.APP_STORE_CONNECT_API_KEY }}
+        dist-cert-p12: ${{ secrets.IOS_DIST_CERT_P12 }}
+        dist-cert-password: ${{ secrets.IOS_DIST_CERT_PASSWORD }}
+        keychain-password: ${{ secrets.KEYCHAIN_PASSWORD }}
+        installer-cert-p12: ${{ secrets.MAC_INSTALLER_CERT_P12 }}
+        installer-cert-password: ${{ secrets.MAC_INSTALLER_CERT_PASSWORD }}
+    - uses: jimgreco/release-tools/ios/upload@bfd9d14bb12907b74bceaa28b7c0382fb3549ea6
+      env:
+        API_BASE_URL: ${{ secrets.IOS_API_BASE_URL }}
+        GOOGLE_CLIENT_ID: ${{ secrets.GOOGLE_IOS_CLIENT_ID }}
+        GOOGLE_REVERSED_CLIENT_ID: ${{ secrets.GOOGLE_IOS_REVERSED_CLIENT_ID }}
+      with:
+        project: RemindersAI.xcodeproj
+        scheme: RemindersAI
+        extra-build-settings: |
+          PROVISIONING_PROFILE_SPECIFIER=@MAC_PROFILE_UUID:app@
+          GIT_COMMIT_HASH=@GIT_SHA7@
+          API_BASE_URL=@ENV:API_BASE_URL@
+          GOOGLE_CLIENT_ID=@ENV:GOOGLE_CLIENT_ID@
+          GOOGLE_REVERSED_CLIENT_ID=@ENV:GOOGLE_REVERSED_CLIENT_ID@
+    - uses: jimgreco/release-tools/ios/cleanup@bfd9d14bb12907b74bceaa28b7c0382fb3549ea6
+      if: always()

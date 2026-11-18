@@ -140,3 +140,13 @@ jobs:
           -destination '${{ steps.simulator.outputs.destination }}' \
           CODE_SIGNING_ALLOWED=NO \
           test
+    - name: Build for Mac Catalyst
+      run: |
+        set -euo pipefail
+        xcodebuild \
+          -project RemindersAI.xcodeproj \
+          -scheme RemindersAI \
+          -configuration Debug \
+          -destination 'platform=macOS,variant=Mac Catalyst' \
+          CODE_SIGNING_ALLOWED=NO \
+          build

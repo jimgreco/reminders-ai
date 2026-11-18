@@ -105,7 +105,7 @@ struct ReminderListView: View {
                 }
             }
             if canAdd {
-                ToolbarItemGroup(placement: .bottomBar) {
+                ToolbarItemGroup(placement: .addBar) {
                     Button {
                         addingFocused = true
                     } label: {

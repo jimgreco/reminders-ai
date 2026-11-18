@@ -18,6 +18,12 @@ Done on 2026-11-18 (kept here as the record of what exists):
   `VQPG55B3R4` ("Week of Us Push Notifications", production only). Use that
   key's `.p8` for `APNS_PRIVATE_KEY`.
 
+- Mac: the same app record has the macOS platform; profile "Reminders AI Mac
+  Catalyst App Store" (UUID in `release-policy.json` under `macProfiles`). The
+  Mac app is the iOS target built with Mac Catalyst and uploads from the `mac`
+  job in `testflight.yml`, which needs the repository secrets
+  `MAC_INSTALLER_CERT_P12` (base64) and `MAC_INSTALLER_CERT_PASSWORD`: the
+  team's Mac Installer Distribution certificate.
 - Google Cloud (project CREAM): iOS OAuth client "Task Sidekick iOS" for the
   bundle ID. Client id
   `1018348991868-0ebtpdb7o8bt8vimj3ftbden3ivom3vu.apps.googleusercontent.com`
