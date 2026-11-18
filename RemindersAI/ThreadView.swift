@@ -1,7 +1,7 @@
 import SwiftUI
 
-/// One reminder: its title and notes, editable in place, with the assistant's
-/// conversation about it underneath. Opening a reminder lands here, ready to
+/// One reminder: its title, notes and details, editable in place, with the
+/// assistant's conversation about it underneath. Opening a reminder lands here, ready to
 /// start chatting or to pick up where the conversation left off.
 struct ThreadView: View {
     let reminderId: String
@@ -14,7 +14,6 @@ struct ThreadView: View {
     @State private var title = ""
     @State private var notes = ""
     @State private var loadedFrom: ReminderItem?
-    @State private var showingDetails = false
     @State private var confirmingDeleteConversation = false
     @State private var confirmingDeleteReminder = false
     @FocusState private var focus: Field?
@@ -82,7 +81,6 @@ struct ThreadView: View {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu("Options", systemImage: "ellipsis.circle") {
                     if let item {
-                        Button("Details", systemImage: "info.circle") { openDetails() }
                         Button(item.isCompleted ? "Mark as Not Completed" : "Mark as Completed", systemImage: "checkmark.circle") {
                             Task { await reminders.setCompleted(item, !item.isCompleted) }
                         }
@@ -121,9 +119,6 @@ struct ThreadView: View {
             }
         } message: {
             Text(hasThread ? "Its conversation with the assistant is deleted too." : "")
-        }
-        .sheet(isPresented: $showingDetails) {
-            if let item { ReminderDetailsSheet(itemId: item.id) }
         }
         .onAppear { if let item { loadFields(item) } }
         .onChange(of: item) { _, changed in
@@ -188,34 +183,13 @@ struct ThreadView: View {
                             .focused($focus, equals: .notes)
                     }
                 }
-                Button(action: openDetails) {
-                    HStack(spacing: 6) {
-                        Text(facts(item))
-                            .font(.subheadline)
-                            .foregroundStyle(item.isOverdue() ? .red : .secondary)
-                            .multilineTextAlignment(.leading)
-                        Spacer()
-                        Image(systemName: "info.circle").foregroundStyle(tint)
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel("Details")
-                .accessibilityValue(facts(item))
+                ReminderDetailsCard(item: item)
             } else {
                 Text(detail?.title ?? "Reminder").font(.title3.bold())
                 Text("This reminder isn't on this iPhone any more.").font(.subheadline).foregroundStyle(.secondary)
             }
             Divider().padding(.top, 4)
         }
-    }
-
-    private func facts(_ item: ReminderItem) -> String {
-        var parts = [item.listTitle]
-        if let due = item.dueDate { parts.append(DueText.short(due, hasTime: item.hasDueTime)) }
-        if item.repeats != .never { parts.append(item.repeats.label) }
-        if item.priority != .none { parts.append("\(item.priority.label) priority") }
-        return parts.filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
     private var fieldsDirty: Bool {
@@ -236,12 +210,6 @@ struct ThreadView: View {
         loadedFrom?.title = newTitle
         loadedFrom?.notes = newNotes
         Task { await reminders.rename(item, title: newTitle, notes: newNotes) }
-    }
-
-    private func openDetails() {
-        saveFields()
-        focus = nil
-        showingDetails = true
     }
 
     // MARK: The conversation

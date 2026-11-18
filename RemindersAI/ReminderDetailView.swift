@@ -1,15 +1,13 @@
 import SwiftUI
 
-/// The Details sheet of one reminder, as in Reminders: title, notes, link,
-/// date, time, repeat, priority and list.
-struct ReminderDetailsSheet: View {
-    let itemId: String
+/// A reminder's details, shown on its page above the conversation: date, time,
+/// repeat, priority, list and link. Each change is saved to Reminders as it is
+/// made; there is no Done button.
+struct ReminderDetailsCard: View {
+    let item: ReminderItem
 
     @Environment(RemindersStore.self) private var reminders
-    @Environment(\.dismiss) private var dismiss
 
-    @State private var title = ""
-    @State private var notes = ""
     @State private var url = ""
     @State private var hasDate = false
     @State private var hasTime = false
@@ -18,103 +16,101 @@ struct ReminderDetailsSheet: View {
     @State private var priority = Priority.none
     @State private var listId = ""
     @State private var loadedFrom: ReminderItem?
-    @State private var confirmingDelete = false
+    @FocusState private var urlFocused: Bool
+
+    private var tint: Color { reminders.color(for: item) }
 
     var body: some View {
-        NavigationStack {
-            Group {
-                if let item = reminders.item(id: itemId) {
-                    form(item)
-                } else {
-                    ContentUnavailableView("Reminder not found", systemImage: "checklist",
-                                           description: Text("It may have been deleted in Reminders."))
+        VStack(spacing: 0) {
+            row("Date", symbol: "calendar") {
+                if hasDate {
+                    DatePicker("Date", selection: $date, displayedComponents: .date).labelsHidden()
+                }
+                Toggle("Date", isOn: $hasDate.animation()).labelsHidden()
+            }
+            if hasDate {
+                Divider().padding(.leading, 44)
+                row("Time", symbol: "clock") {
+                    if hasTime {
+                        DatePicker("Time", selection: $date, displayedComponents: .hourAndMinute).labelsHidden()
+                    }
+                    Toggle("Time", isOn: $hasTime.animation()).labelsHidden()
+                }
+                Divider().padding(.leading, 44)
+                row("Repeat", symbol: "repeat") {
+                    Picker("Repeat", selection: $repeats) {
+                        ForEach(Repeat.allCases) { Text($0.label).tag($0) }
+                    }
+                    .labelsHidden()
                 }
             }
-            .navigationTitle("Details")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Done") {
-                        Task {
-                            if let item = reminders.item(id: itemId) { await save(item) }
-                            dismiss()
-                        }
+            Divider().padding(.leading, 44)
+            row("Priority", symbol: "exclamationmark.circle") {
+                Picker("Priority", selection: $priority) {
+                    ForEach(Priority.allCases) { Text($0.label).tag($0) }
+                }
+                .labelsHidden()
+            }
+            Divider().padding(.leading, 44)
+            row("List", symbol: "list.bullet") {
+                Picker("List", selection: $listId) {
+                    ForEach(reminders.lists.filter { $0.isWritable || $0.id == item.listId }) { list in
+                        Text(list.title).tag(list.id)
                     }
                 }
+                .labelsHidden()
             }
-        }
-    }
-
-    private func form(_ item: ReminderItem) -> some View {
-        Form {
-            Section {
-                TextField("Title", text: $title, axis: .vertical)
-                TextField("Notes", text: $notes, axis: .vertical).lineLimit(3...12)
+            Divider().padding(.leading, 44)
+            HStack(spacing: 12) {
+                Image(systemName: "link").foregroundStyle(tint).frame(width: 20)
                 TextField("URL", text: $url)
                     .keyboardType(.URL)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
+                    .submitLabel(.done)
+                    .focused($urlFocused)
+                    .onSubmit(save)
             }
-
-            Section {
-                Toggle(isOn: $hasDate.animation()) { Label("Date", systemImage: "calendar") }
-                if hasDate {
-                    DatePicker("Date", selection: $date, displayedComponents: .date)
-                    Toggle(isOn: $hasTime.animation()) { Label("Time", systemImage: "clock") }
-                    if hasTime {
-                        DatePicker("Time", selection: $date, displayedComponents: .hourAndMinute)
-                    }
-                    Picker(selection: $repeats) {
-                        ForEach(Repeat.allCases) { Text($0.label).tag($0) }
-                    } label: {
-                        Label("Repeat", systemImage: "repeat")
-                    }
-                }
-            }
-
-            Section {
-                Picker(selection: $priority) {
-                    ForEach(Priority.allCases) { Text($0.label).tag($0) }
-                } label: {
-                    Label("Priority", systemImage: "exclamationmark.circle")
-                }
-                Picker(selection: $listId) {
-                    ForEach(reminders.lists.filter { $0.isWritable || $0.id == item.listId }) { list in
-                        Text(list.title).tag(list.id)
-                    }
-                } label: {
-                    Label("List", systemImage: "list.bullet")
-                }
-            }
-
-            Section {
-                Button(item.isCompleted ? "Mark as Not Completed" : "Mark as Completed") {
-                    Task {
-                        await save(item)
-                        await reminders.setCompleted(item, !item.isCompleted)
-                    }
-                }
-                Button("Delete Reminder", role: .destructive) { confirmingDelete = true }
-            }
-
-            if let error = reminders.lastError {
-                Section { Text(error).font(.footnote).foregroundStyle(.red) }
-            }
+            .padding(.horizontal, 12)
+            .frame(minHeight: 44)
         }
+        .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 12))
+        .tint(tint)
         .onAppear { load(item) }
         .onChange(of: item) { _, changed in
-            // Reload the fields when the reminder changes underneath (an edit by
-            // the assistant or in Reminders), unless there are unsaved edits here.
+            // Pick up changes made elsewhere (the assistant, Reminders) unless
+            // something here is still unsaved.
             if !isDirty { load(changed) }
         }
-        .confirmationDialog("Delete this reminder?", isPresented: $confirmingDelete, titleVisibility: .visible) {
-            Button("Delete Reminder", role: .destructive) {
-                Task {
-                    await reminders.delete(item)
-                    dismiss()
-                }
-            }
+        .onChange(of: hasDate) { _, _ in save() }
+        .onChange(of: hasTime) { _, on in
+            // A newly added time starts at the next full hour, not midnight.
+            if on, loadedFrom?.hasDueTime != true { date = Self.nextHour(on: date) }
+            save()
         }
+        .onChange(of: date) { _, _ in save() }
+        .onChange(of: repeats) { _, _ in save() }
+        .onChange(of: priority) { _, _ in save() }
+        .onChange(of: listId) { _, _ in save() }
+        .onChange(of: urlFocused) { _, focused in if !focused { save() } }
+        .onDisappear(perform: save)
+    }
+
+    private func row(_ title: String, symbol: String, @ViewBuilder controls: () -> some View) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: symbol).foregroundStyle(tint).frame(width: 20)
+            Text(title)
+            Spacer(minLength: 8)
+            controls()
+        }
+        .padding(.horizontal, 12)
+        .frame(minHeight: 44)
+    }
+
+    static func nextHour(on day: Date, now: Date = Date()) -> Date {
+        let calendar = Calendar.current
+        let hour = (calendar.component(.hour, from: now) + 1) % 24
+        return calendar.date(bySettingHour: hour, minute: 0, second: 0, of: day) ?? day
     }
 
     private var dueComponents: DateComponents? {
@@ -123,15 +119,12 @@ struct ReminderDetailsSheet: View {
 
     private var isDirty: Bool {
         guard let loadedFrom else { return false }
-        return title != loadedFrom.title || notes != loadedFrom.notes || priority != loadedFrom.priority
-            || url != loadedFrom.url || listId != loadedFrom.listId
+        return priority != loadedFrom.priority || url != loadedFrom.url || listId != loadedFrom.listId
             || (hasDate ? repeats : .never) != loadedFrom.repeats
             || DueDate.string(from: dueComponents) != DueDate.string(from: loadedFrom.due)
     }
 
     private func load(_ item: ReminderItem) {
-        title = item.title
-        notes = item.notes
         url = item.url
         priority = item.priority
         repeats = item.repeats
@@ -142,10 +135,20 @@ struct ReminderDetailsSheet: View {
         loadedFrom = item
     }
 
-    private func save(_ item: ReminderItem) async {
-        guard isDirty, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        await reminders.update(item, title: title, notes: notes, due: dueComponents, priority: priority,
-                               repeats: hasDate ? repeats : .never, url: url, listId: listId)
-        if let saved = reminders.item(id: itemId) { load(saved) }
+    private func save() {
+        guard isDirty, let current = reminders.item(id: item.id) else { return }
+        let (due, newRepeats, newPriority, newURL, newList) = (dueComponents, hasDate ? repeats : .never, priority, url, listId)
+        // Mark these values as the saved ones first, so the reload that follows
+        // the save does not look like a change made elsewhere.
+        loadedFrom?.due = due
+        loadedFrom?.repeats = newRepeats
+        loadedFrom?.priority = newPriority
+        loadedFrom?.url = newURL
+        loadedFrom?.listId = newList
+        Task {
+            await reminders.update(current, title: current.title, notes: current.notes, due: due, priority: newPriority,
+                                   repeats: newRepeats, url: newURL, listId: newList)
+            if let saved = reminders.item(id: item.id), !isDirty { load(saved) }
+        }
     }
 }
