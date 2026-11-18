@@ -1,0 +1,21 @@
+{
+  "name": "reminders-ai-server",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "AI threads for Apple Reminders: a Claude agent works each item, asks questions and queues edits the iPhone applies.",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node src/server.js",
+    "db:migrate": "node src/migrate.js",
+    "agent:setup": "node scripts/setup-agent.js",
+    "test": "node --test test/*.test.js"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^1.10.0",
+    "apple-signin-auth": "^1.7.3",
+    "pg": "^8.22.0"
+  }
+}

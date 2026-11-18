@@ -1,0 +1,40 @@
+{
+  "app": "reminders-ai",
+  "appId": "FILL_IN_APP_STORE_CONNECT_APP_ID",
+  "bundleId": "com.jimgreco.remindersai",
+  "teamId": "V6JPQCD336",
+  "certificateSha256": "7fb57dbf0cd7923f9ba97d8801824de79e1ba235dbe78d4a821f8195c30f0bf8",
+  "certificateSha1": "963A7A5107DB8D4C141371C285F71CCAE84A5452",
+  "testerEmailSha256s": [
+    "a46343858cf3e5e2fda6339f7063190f295ece10dea50979932e69ec57ea4baa"
+  ],
+  "groups": [
+    {
+      "id": "FILL_IN_TESTFLIGHT_GROUP_ID",
+      "name": "Family",
+      "internal": true,
+      "testers": 1,
+      "automatic": true
+    }
+  ],
+  "profiles": {
+    "app": {
+      "uuid": "FILL_IN_PROFILE_UUID",
+      "name": "Reminders AI App Store",
+      "bundleId": "com.jimgreco.remindersai",
+      "groups": [],
+      "appleSignin": [
+        "Default"
+      ],
+      "push": "production"
+    }
+  },
+  "marketingVersion": "1.0",
+  "buildAudience": "APP_STORE_ELIGIBLE",
+  "apiOrigin": "https://tasks.jim-greco.com",
+  "infoPlists": [
+    "RemindersAI/Info.plist"
+  ],
+  "configuredPlistKeys": [],
+  "allowApprovedIndividualTesters": true
+}

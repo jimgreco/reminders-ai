@@ -1,0 +1,15 @@
+{
+  "app": "reminders-ai",
+  "image": "ghcr.io/jimgreco/reminders-ai",
+  "images": [
+    { "context": "server", "dockerfile": "server/Dockerfile", "build_args": { "APP_BUILD": "{sha}" } }
+  ],
+  "profile": "reminders-ai",
+  "services": {
+    "reminders-ai": {
+      "health": ["node", "-e", "fetch('http://127.0.0.1:8792/health').then(r=>r.ok?r.json():Promise.reject(new Error('health'))).then(h=>process.exit(h.ok===true&&h.db===true&&h.build==='{sha}'?0:1)).catch(()=>process.exit(1))"]
+    }
+  },
+  "interpolate_from_live": { "REMINDERS_AI_IMAGE": "image:reminders-ai" },
+  "refuse_backwards": true
+}
