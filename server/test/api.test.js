@@ -307,6 +307,28 @@ function suite(name, makeStore) {
       assert.equal(app.agents.created.length, 3);
     });
 
+    test("a conversation follows its reminder to a new id", async () => {
+      const moved = "MOVED-456";
+      const movedPath = (suffix = "") => `/api/threads/${encodeURIComponent(moved)}${suffix}`;
+      const before = await thread();
+      let r = await app.call("POST", threadPath("/move"), { token, body: { to: moved } });
+      assert.equal(r.status, 200);
+      assert.equal(r.body.reminderId, moved);
+      assert.equal((await app.call("GET", threadPath(), { token })).status, 404);
+      const after = (await app.call("GET", movedPath(), { token })).body;
+      assert.deepEqual(after.messages.map((m) => m.id), before.messages.map((m) => m.id));
+      // Moving onto a reminder that already has a conversation is refused.
+      await app.call("POST", threadPath("/messages"), { token, body: { text: "hi", reminder: REMINDER } });
+      r = await app.call("POST", threadPath("/move"), { token, body: { to: moved } });
+      assert.equal(r.status, 409);
+      r = await app.call("POST", movedPath("/move"), { token, body: {} });
+      assert.equal(r.status, 400);
+      // Put things back for the tests that follow.
+      await app.call("DELETE", threadPath(), { token });
+      r = await app.call("POST", movedPath("/move"), { token, body: { to: RID } });
+      assert.equal(r.status, 200);
+    });
+
     test("photos reach the agent as images, are listed without their data, and are served only to the owner", async () => {
       const jpeg = Buffer.concat([Buffer.from([0xff, 0xd8, 0xff, 0xe0]), Buffer.alloc(64, 7)]);
       const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47]), Buffer.alloc(32, 1)]);

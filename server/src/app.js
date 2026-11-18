@@ -398,7 +398,7 @@ export function createApp({ store, config, assistant, verifyAppleToken, verifyGo
       return response.end(Buffer.from(attachment.data, "base64"));
     }
 
-    const threadMatch = path.match(/^\/api\/threads\/([^/]+)(\/(messages|stop|read))?$/);
+    const threadMatch = path.match(/^\/api\/threads\/([^/]+)(\/(messages|stop|read|move))?$/);
     if (threadMatch) {
       let reminderId;
       try {
@@ -433,6 +433,19 @@ export function createApp({ store, config, assistant, verifyAppleToken, verifyGo
       }
       if (method === "POST" && action === "read") {
         if (thread.unread) thread = await store.updateThread(thread.id, { unread: false });
+        return send(response, 200, threadSummary(thread));
+      }
+      if (method === "POST" && action === "move") {
+        // The reminder got a new id, as EventKit does when it moves to another list.
+        const body = await readJSON(request);
+        const to = typeof body.to === "string" ? body.to : "";
+        if (!to || to.length > 255) throw new HttpError(400, "to required");
+        try {
+          thread = await store.moveThread(user.id, reminderId, to);
+        } catch (error) {
+          if (error.message === "conflict") throw new HttpError(409, "that reminder already has a conversation");
+          throw error;
+        }
         return send(response, 200, threadSummary(thread));
       }
       if (method === "POST" && action === "stop") {

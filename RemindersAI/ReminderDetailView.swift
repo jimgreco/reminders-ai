@@ -5,6 +5,8 @@ import SwiftUI
 /// made; there is no Done button.
 struct ReminderDetailsCard: View {
     let item: ReminderItem
+    /// Called with the reminder's new external id when a move to another list changed it.
+    var onMoved: (String) -> Void = { _ in }
 
     @Environment(RemindersStore.self) private var reminders
 
@@ -146,9 +148,12 @@ struct ReminderDetailsCard: View {
         loadedFrom?.url = newURL
         loadedFrom?.listId = newList
         Task {
-            await reminders.update(current, title: current.title, notes: current.notes, due: due, priority: newPriority,
-                                   repeats: newRepeats, url: newURL, listId: newList)
-            if let saved = reminders.item(id: item.id), !isDirty { load(saved) }
+            let savedId = await reminders.update(current, title: current.title, notes: current.notes, due: due,
+                                                 priority: newPriority, repeats: newRepeats, url: newURL, listId: newList)
+            if let savedId, savedId != current.externalId { onMoved(savedId) }
+            let saved = reminders.item(externalId: savedId ?? current.externalId) ?? reminders.item(id: current.id)
+            // After a failed save, show what Reminders really has.
+            if let saved, savedId == nil || !isDirty { load(saved) }
         }
     }
 }

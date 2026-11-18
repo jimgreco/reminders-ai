@@ -339,8 +339,12 @@ final class RemindersStore {
         }
     }
 
+    /// Saves the reminder's fields and, when `listId` differs, moves it. Returns the
+    /// reminder's external id afterwards: EventKit may give a moved reminder a new one.
+    @discardableResult
     func update(_ item: ReminderItem, title: String, notes: String, due: DateComponents?, priority: Priority,
-                repeats: Repeat, url: String, listId: String) async {
+                repeats: Repeat, url: String, listId: String) async -> String? {
+        var savedId: String?
         await perform {
             guard let reminder = reminder(id: item.id) else { throw ReminderEditError.missing }
             reminder.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -361,14 +365,55 @@ final class RemindersStore {
                     throw ReminderEditError.invalid("That link isn't a valid address.")
                 }
             }
-            if listId != item.listId {
-                guard let calendar = eventStore.calendar(withIdentifier: listId), calendar.allowsContentModifications else {
-                    throw ReminderEditError.readOnly
-                }
-                reminder.calendar = calendar
+            guard listId != item.listId else {
+                try save(reminder)
+                savedId = reminder.calendarItemExternalIdentifier ?? reminder.calendarItemIdentifier
+                return
             }
-            try save(reminder)
+            guard let calendar = eventStore.calendar(withIdentifier: listId), calendar.allowsContentModifications else {
+                throw ReminderEditError.readOnly
+            }
+            savedId = try move(reminder, to: calendar)
         }
+        return savedId
+    }
+
+    /// Moves a reminder to another list. EventKit sometimes refuses the move, or
+    /// saves without moving it; then the reminder is copied into the list and the
+    /// original removed, as Reminders itself does between accounts.
+    private func move(_ reminder: EKReminder, to calendar: EKCalendar) throws -> String {
+        let copy = EKReminder(eventStore: eventStore)
+        copy.title = reminder.title
+        copy.notes = reminder.notes
+        copy.url = reminder.url
+        copy.priority = reminder.priority
+        copy.startDateComponents = reminder.startDateComponents
+        copy.dueDateComponents = reminder.dueDateComponents
+        for alarm in reminder.alarms ?? [] { copy.addAlarm(alarm.copy() as! EKAlarm) }
+        for rule in reminder.recurrenceRules ?? [] { copy.addRecurrenceRule(rule.copy() as! EKRecurrenceRule) }
+        copy.isCompleted = reminder.isCompleted
+        let originalId = reminder.calendarItemIdentifier
+        let originalCalendar = reminder.calendar
+
+        reminder.calendar = calendar
+        if (try? eventStore.save(reminder, commit: true)) != nil,
+           let saved = eventStore.calendarItem(withIdentifier: reminder.calendarItemIdentifier) as? EKReminder,
+           saved.calendar?.calendarIdentifier == calendar.calendarIdentifier {
+            return saved.calendarItemExternalIdentifier ?? saved.calendarItemIdentifier
+        }
+
+        reminder.calendar = originalCalendar
+        copy.calendar = calendar
+        try eventStore.save(copy, commit: true)
+        if let original = self.reminder(id: originalId), original.calendarItemIdentifier != copy.calendarItemIdentifier {
+            do {
+                try eventStore.remove(original, commit: true)
+            } catch {
+                // Better a duplicate than a lost reminder; say so.
+                throw ReminderEditError.invalid("Copied to \(calendar.title), but the original couldn't be removed.")
+            }
+        }
+        return copy.calendarItemExternalIdentifier ?? copy.calendarItemIdentifier
     }
 
     // MARK: Lists

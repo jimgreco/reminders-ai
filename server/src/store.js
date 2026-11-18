@@ -115,6 +115,19 @@ export class MemoryStore {
     return thread;
   }
 
+  /** Re-keys a thread when its reminder gets a new id (moved to another list).
+   *  Returns null when there is no thread; throws "conflict" if `to` has one. */
+  async moveThread(userId, from, to) {
+    const thread = [...this.threads.values()].find((t) => t.userId === userId && t.reminderId === from);
+    if (!thread) return null;
+    if (from === to) return { ...thread };
+    if (await this.getThread(userId, to)) throw new Error("conflict");
+    thread.reminderId = to;
+    thread.updatedAt = new Date().toISOString();
+    for (const op of this.ops) if (op.threadId === thread.id) op.reminderId = to;
+    return { ...thread };
+  }
+
   async addMessage(threadId, role, text, options = null, attachments = null) {
     const message = { id: crypto.randomUUID(), threadId, role, text, options, attachments, createdAt: new Date().toISOString() };
     this.messages.push(message);
@@ -349,6 +362,31 @@ export class PostgresStore {
       "DELETE FROM rai_threads WHERE user_id = $1 AND reminder_id = $2 RETURNING *", [userId, reminderId]
     );
     return rows[0] ? threadFromRow(rows[0]) : null;
+  }
+
+  async moveThread(userId, from, to) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      let rows;
+      try {
+        ({ rows } = await client.query(
+          `UPDATE rai_threads SET reminder_id = $3, updated_at = now()
+           WHERE user_id = $1 AND reminder_id = $2 RETURNING *`, [userId, from, to]
+        ));
+      } catch (error) {
+        if (error.code === "23505") throw new Error("conflict");
+        throw error;
+      }
+      if (rows[0]) await client.query("UPDATE rai_ops SET reminder_id = $2 WHERE thread_id = $1", [rows[0].id, to]);
+      await client.query("COMMIT");
+      return rows[0] ? threadFromRow(rows[0]) : null;
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
   }
 
   async addMessage(threadId, role, text, options = null, attachments = null) {

@@ -117,6 +117,21 @@ final class AssistantStore {
         let _: ThreadSummary? = try? await session.request("POST", APIPath.thread(reminderId, "/stop"))
     }
 
+    /// Carries a conversation over to its reminder's new id after a move between lists.
+    func move(_ reminderId: String, to newId: String, session: Session) async {
+        guard reminderId != newId else { return }
+        if let detail = details.removeValue(forKey: reminderId) { details[newId] = detail }
+        if let summary = threads.removeValue(forKey: reminderId) { threads[newId] = summary }
+        guard threads[newId] != nil else { return }
+        struct Body: Encodable { let to: String }
+        do {
+            let _: ThreadSummary = try await session.request("POST", APIPath.thread(reminderId, "/move"), body: Body(to: newId))
+            await load(newId, session: session)
+        } catch {
+            lastError = "The conversation couldn't follow the reminder to its new list: \(error.localizedDescription)"
+        }
+    }
+
     func delete(_ reminderId: String, session: Session) async {
         let _: EmptyResponse? = try? await session.request("DELETE", APIPath.thread(reminderId))
         details[reminderId] = nil
