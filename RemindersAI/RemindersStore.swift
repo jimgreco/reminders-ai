@@ -18,6 +18,8 @@ struct ReminderItem: Identifiable, Equatable, Sendable {
     var created: Date?
     var listId: String
     var listTitle: String
+    var repeats: Repeat
+    var url: String
 
     init(_ reminder: EKReminder) {
         id = reminder.calendarItemIdentifier
@@ -31,6 +33,8 @@ struct ReminderItem: Identifiable, Equatable, Sendable {
         created = reminder.creationDate
         listId = reminder.calendar?.calendarIdentifier ?? ""
         listTitle = reminder.calendar?.title ?? ""
+        repeats = Repeat(reminder.recurrenceRules?.first)
+        url = reminder.url?.absoluteString ?? ""
     }
 
     var dueDate: Date? {
@@ -64,11 +68,69 @@ struct ReminderList: Identifiable, Equatable {
     var title: String
     var color: Color
     var isWritable: Bool
+    /// False for lists the account does not let this app rename or delete.
+    var isEditable: Bool
 }
 
 enum ReminderFilter: Hashable {
-    case today, scheduled, all, assistant
+    case today, scheduled, all, completed, assistant
     case list(String)
+}
+
+/// The simple repeat choices Reminders offers. A reminder with a more
+/// elaborate rule reads as its base frequency and is left alone unless changed.
+enum Repeat: String, CaseIterable, Identifiable, Sendable {
+    case never, daily, weekly, monthly, yearly
+
+    var id: String { rawValue }
+    var label: String { rawValue.capitalized }
+
+    init(_ rule: EKRecurrenceRule?) {
+        switch rule?.frequency {
+        case .daily: self = .daily
+        case .weekly: self = .weekly
+        case .monthly: self = .monthly
+        case .yearly: self = .yearly
+        default: self = .never
+        }
+    }
+
+    var rule: EKRecurrenceRule? {
+        let frequency: EKRecurrenceFrequency
+        switch self {
+        case .never: return nil
+        case .daily: frequency = .daily
+        case .weekly: frequency = .weekly
+        case .monthly: frequency = .monthly
+        case .yearly: frequency = .yearly
+        }
+        return EKRecurrenceRule(recurrenceWith: frequency, interval: 1, end: nil)
+    }
+}
+
+/// The colours Reminders offers for a list.
+enum ListColor: String, CaseIterable, Identifiable {
+    case red, orange, yellow, green, cyan, blue, indigo, pink, purple, brown, gray
+
+    var id: String { rawValue }
+
+    var uiColor: UIColor {
+        switch self {
+        case .red: .systemRed
+        case .orange: .systemOrange
+        case .yellow: .systemYellow
+        case .green: .systemGreen
+        case .cyan: .systemCyan
+        case .blue: .systemBlue
+        case .indigo: .systemIndigo
+        case .pink: .systemPink
+        case .purple: .systemPurple
+        case .brown: .systemBrown
+        case .gray: .systemGray
+        }
+    }
+
+    var color: Color { Color(uiColor) }
 }
 
 enum RemindersAccess { case unknown, granted, denied }
@@ -137,7 +199,10 @@ final class RemindersStore {
     func reload() async {
         guard access == .granted else { return }
         lists = eventStore.calendars(for: .reminder)
-            .map { ReminderList(id: $0.calendarIdentifier, title: $0.title, color: Color(cgColor: $0.cgColor), isWritable: $0.allowsContentModifications) }
+            .map {
+                ReminderList(id: $0.calendarIdentifier, title: $0.title, color: Color(cgColor: $0.cgColor),
+                             isWritable: $0.allowsContentModifications, isEditable: !$0.isImmutable)
+            }
             .sorted { $0.title.localizedCaseInsensitiveCompare($1.title) == .orderedAscending }
         defaultListId = eventStore.defaultCalendarForNewReminders()?.calendarIdentifier
         let recent = Calendar.current.date(byAdding: .day, value: -30, to: Date())
@@ -164,15 +229,26 @@ final class RemindersStore {
 
     func color(for item: ReminderItem) -> Color { list(item.listId)?.color ?? .accentColor }
 
+    /// The number on a list's card or row: open reminders, or for Completed, the completed ones.
     func openCount(_ filter: ReminderFilter, threadIds: Set<String> = []) -> Int {
         items(for: filter, includeCompleted: false, threadIds: threadIds).count
     }
 
+    /// Reminders whose title or notes contain the text, completed ones included.
+    func search(_ text: String) -> [ReminderItem] {
+        let query = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return [] }
+        return items(for: .all, includeCompleted: true).filter {
+            $0.title.localizedCaseInsensitiveContains(query) || $0.notes.localizedCaseInsensitiveContains(query)
+        }
+    }
+
     func items(for filter: ReminderFilter, includeCompleted: Bool, threadIds: Set<String> = []) -> [ReminderItem] {
         let matching = items.filter { item in
+            if filter == .completed { return item.isCompleted }
             guard includeCompleted || !item.isCompleted else { return false }
             switch filter {
-            case .all: return true
+            case .all, .completed: return true
             case .today: return item.isDueToday()
             case .scheduled: return item.due != nil
             case .assistant: return threadIds.contains(item.externalId)
@@ -216,15 +292,41 @@ final class RemindersStore {
         await reload()
     }
 
-    func add(title: String, listId: String?) async {
+    func add(title: String, notes: String = "", listId: String?, due: DateComponents? = nil) async {
         let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else { return }
         await perform {
             let reminder = EKReminder(eventStore: eventStore)
             reminder.title = trimmed
+            reminder.notes = notes.isEmpty ? nil : notes
             let calendar = listId.flatMap { eventStore.calendar(withIdentifier: $0) } ?? eventStore.defaultCalendarForNewReminders()
             guard let calendar, calendar.allowsContentModifications else { throw ReminderEditError.readOnly }
             reminder.calendar = calendar
+            setDue(due, on: reminder)
+            try save(reminder)
+        }
+    }
+
+    /// Sets the due date and, as Reminders does, an alert at that moment when
+    /// the date has a time. All-day reminders rely on Reminders' own daily alert.
+    private func setDue(_ due: DateComponents?, on reminder: EKReminder) {
+        reminder.dueDateComponents = due
+        for alarm in reminder.alarms ?? [] where alarm.absoluteDate != nil { reminder.removeAlarm(alarm) }
+        if let due, due.hour != nil, let date = Calendar.current.date(from: due) {
+            reminder.addAlarm(EKAlarm(absoluteDate: date))
+        }
+        // EventKit refuses a repeating reminder without a due date.
+        if due == nil, let rules = reminder.recurrenceRules { rules.forEach(reminder.removeRecurrenceRule) }
+    }
+
+    /// Title and notes only, for typing straight into a reminder.
+    func rename(_ item: ReminderItem, title: String, notes: String) async {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, trimmed != item.title || notes != item.notes else { return }
+        await perform {
+            guard let reminder = reminder(id: item.id) else { throw ReminderEditError.missing }
+            reminder.title = trimmed
+            reminder.notes = notes.isEmpty ? nil : notes
             try save(reminder)
         }
     }
@@ -237,14 +339,76 @@ final class RemindersStore {
         }
     }
 
-    func update(_ item: ReminderItem, title: String, notes: String, due: DateComponents?, priority: Priority) async {
+    func update(_ item: ReminderItem, title: String, notes: String, due: DateComponents?, priority: Priority,
+                repeats: Repeat, url: String, listId: String) async {
         await perform {
             guard let reminder = reminder(id: item.id) else { throw ReminderEditError.missing }
             reminder.title = title.trimmingCharacters(in: .whitespacesAndNewlines)
             reminder.notes = notes.isEmpty ? nil : notes
-            reminder.dueDateComponents = due
+            if DueDate.string(from: due) != DueDate.string(from: item.due) { setDue(due, on: reminder) }
             reminder.priority = priority.eventKit
+            if repeats != item.repeats || due == nil {
+                reminder.recurrenceRules?.forEach(reminder.removeRecurrenceRule)
+                if due != nil, let rule = repeats.rule { reminder.addRecurrenceRule(rule) }
+            }
+            let trimmedURL = url.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmedURL != item.url {
+                if trimmedURL.isEmpty {
+                    reminder.url = nil
+                } else if let parsed = URL(string: trimmedURL.contains("://") ? trimmedURL : "https://\(trimmedURL)") {
+                    reminder.url = parsed
+                } else {
+                    throw ReminderEditError.invalid("That link isn't a valid address.")
+                }
+            }
+            if listId != item.listId {
+                guard let calendar = eventStore.calendar(withIdentifier: listId), calendar.allowsContentModifications else {
+                    throw ReminderEditError.readOnly
+                }
+                reminder.calendar = calendar
+            }
             try save(reminder)
+        }
+    }
+
+    // MARK: Lists
+
+    func createList(title: String, color: ListColor) async {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        await perform {
+            // New lists go where new reminders go (normally iCloud), else any account that takes them.
+            let source = eventStore.defaultCalendarForNewReminders()?.source
+                ?? eventStore.sources.first { $0.sourceType == .calDAV || $0.sourceType == .local }
+            guard let source else { throw ReminderEditError.invalid("No Reminders account can hold a new list.") }
+            let calendar = EKCalendar(for: .reminder, eventStore: eventStore)
+            calendar.title = trimmed
+            calendar.cgColor = color.uiColor.cgColor
+            calendar.source = source
+            try eventStore.saveCalendar(calendar, commit: true)
+        }
+    }
+
+    func updateList(_ list: ReminderList, title: String, color: ListColor?) async {
+        let trimmed = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        await perform {
+            guard let calendar = eventStore.calendar(withIdentifier: list.id), !calendar.isImmutable else {
+                throw ReminderEditError.readOnly
+            }
+            calendar.title = trimmed
+            if let color { calendar.cgColor = color.uiColor.cgColor }
+            try eventStore.saveCalendar(calendar, commit: true)
+        }
+    }
+
+    /// Deletes the list and every reminder in it, as Reminders does.
+    func deleteList(_ list: ReminderList) async {
+        await perform {
+            guard let calendar = eventStore.calendar(withIdentifier: list.id), !calendar.isImmutable else {
+                throw ReminderEditError.readOnly
+            }
+            try eventStore.removeCalendar(calendar, commit: true)
         }
     }
 
@@ -287,10 +451,10 @@ final class RemindersStore {
         if let priority = payload.priority.flatMap(Priority.init(rawValue:)) { reminder.priority = priority.eventKit }
         switch payload.due {
         case .unchanged: break
-        case .clear: reminder.dueDateComponents = nil
+        case .clear: setDue(nil, on: reminder)
         case .set(let value):
             guard let components = DueDate.components(from: value) else { throw ReminderEditError.invalid("Bad due date: \(value)") }
-            reminder.dueDateComponents = components
+            setDue(components, on: reminder)
         }
     }
 }

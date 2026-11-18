@@ -1,34 +1,48 @@
 import SwiftUI
 
-/// One reminder: its fields, editable as in Reminders, and the way into its
-/// assistant thread.
-struct ReminderDetailView: View {
+/// The Details sheet of one reminder, as in Reminders: title, notes, link,
+/// date, time, repeat, priority and list.
+struct ReminderDetailsSheet: View {
     let itemId: String
 
-    @Environment(AppModel.self) private var model
     @Environment(RemindersStore.self) private var reminders
-    @Environment(AssistantStore.self) private var assistant
     @Environment(\.dismiss) private var dismiss
 
     @State private var title = ""
     @State private var notes = ""
+    @State private var url = ""
     @State private var hasDate = false
     @State private var hasTime = false
     @State private var date = Date()
+    @State private var repeats = Repeat.never
     @State private var priority = Priority.none
+    @State private var listId = ""
     @State private var loadedFrom: ReminderItem?
+    @State private var confirmingDelete = false
 
     var body: some View {
-        Group {
-            if let item = reminders.item(id: itemId) {
-                form(item)
-            } else {
-                ContentUnavailableView("Reminder not found", systemImage: "checklist",
-                                       description: Text("It may have been deleted in Reminders."))
+        NavigationStack {
+            Group {
+                if let item = reminders.item(id: itemId) {
+                    form(item)
+                } else {
+                    ContentUnavailableView("Reminder not found", systemImage: "checklist",
+                                           description: Text("It may have been deleted in Reminders."))
+                }
+            }
+            .navigationTitle("Details")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Done") {
+                        Task {
+                            if let item = reminders.item(id: itemId) { await save(item) }
+                            dismiss()
+                        }
+                    }
+                }
             }
         }
-        .navigationTitle("Details")
-        .navigationBarTitleDisplayMode(.inline)
     }
 
     private func form(_ item: ReminderItem) -> some View {
@@ -36,17 +50,10 @@ struct ReminderDetailView: View {
             Section {
                 TextField("Title", text: $title, axis: .vertical)
                 TextField("Notes", text: $notes, axis: .vertical).lineLimit(3...12)
-            }
-
-            Section {
-                Button {
-                    Task {
-                        await save(item)
-                        model.path.append(.thread(item.externalId))
-                    }
-                } label: {
-                    AssistantEntry(thread: assistant.summary(for: item.externalId))
-                }
+                TextField("URL", text: $url)
+                    .keyboardType(.URL)
+                    .textInputAutocapitalization(.never)
+                    .autocorrectionDisabled()
             }
 
             Section {
@@ -57,6 +64,11 @@ struct ReminderDetailView: View {
                     if hasTime {
                         DatePicker("Time", selection: $date, displayedComponents: .hourAndMinute)
                     }
+                    Picker(selection: $repeats) {
+                        ForEach(Repeat.allCases) { Text($0.label).tag($0) }
+                    } label: {
+                        Label("Repeat", systemImage: "repeat")
+                    }
                 }
             }
 
@@ -66,8 +78,10 @@ struct ReminderDetailView: View {
                 } label: {
                     Label("Priority", systemImage: "exclamationmark.circle")
                 }
-                LabeledContent {
-                    Text(item.listTitle)
+                Picker(selection: $listId) {
+                    ForEach(reminders.lists.filter { $0.isWritable || $0.id == item.listId }) { list in
+                        Text(list.title).tag(list.id)
+                    }
                 } label: {
                     Label("List", systemImage: "list.bullet")
                 }
@@ -80,12 +94,11 @@ struct ReminderDetailView: View {
                         await reminders.setCompleted(item, !item.isCompleted)
                     }
                 }
-                Button("Delete Reminder", role: .destructive) {
-                    Task {
-                        await reminders.delete(item)
-                        dismiss()
-                    }
-                }
+                Button("Delete Reminder", role: .destructive) { confirmingDelete = true }
+            }
+
+            if let error = reminders.lastError {
+                Section { Text(error).font(.footnote).foregroundStyle(.red) }
             }
         }
         .onAppear { load(item) }
@@ -94,29 +107,35 @@ struct ReminderDetailView: View {
             // the assistant or in Reminders), unless there are unsaved edits here.
             if !isDirty { load(changed) }
         }
-        .onDisappear {
-            if let current = reminders.item(id: itemId) { Task { await save(current) } }
+        .confirmationDialog("Delete this reminder?", isPresented: $confirmingDelete, titleVisibility: .visible) {
+            Button("Delete Reminder", role: .destructive) {
+                Task {
+                    await reminders.delete(item)
+                    dismiss()
+                }
+            }
         }
     }
 
     private var dueComponents: DateComponents? {
-        guard hasDate else { return nil }
-        let units: Set<Calendar.Component> = hasTime ? [.year, .month, .day, .hour, .minute] : [.year, .month, .day]
-        var components = Calendar.current.dateComponents(units, from: date)
-        components.calendar = Calendar.current
-        return components
+        DueDate.components(hasDate: hasDate, hasTime: hasTime, date: date)
     }
 
     private var isDirty: Bool {
         guard let loadedFrom else { return false }
         return title != loadedFrom.title || notes != loadedFrom.notes || priority != loadedFrom.priority
+            || url != loadedFrom.url || listId != loadedFrom.listId
+            || (hasDate ? repeats : .never) != loadedFrom.repeats
             || DueDate.string(from: dueComponents) != DueDate.string(from: loadedFrom.due)
     }
 
     private func load(_ item: ReminderItem) {
         title = item.title
         notes = item.notes
+        url = item.url
         priority = item.priority
+        repeats = item.repeats
+        listId = item.listId
         hasDate = item.due != nil
         hasTime = item.hasDueTime
         date = item.dueDate ?? Date()
@@ -125,45 +144,8 @@ struct ReminderDetailView: View {
 
     private func save(_ item: ReminderItem) async {
         guard isDirty, !title.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
-        await reminders.update(item, title: title, notes: notes, due: dueComponents, priority: priority)
-        if let saved = reminders.item(id: itemId) { loadedFrom = saved }
-    }
-}
-
-private struct AssistantEntry: View {
-    let thread: ThreadSummary?
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "sparkles")
-                .font(.body.bold())
-                .foregroundStyle(.white)
-                .frame(width: 34, height: 34)
-                .background(.purple, in: RoundedRectangle(cornerRadius: 8))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(thread == nil ? "Work on this" : "Assistant").foregroundStyle(Color.primary)
-                Text(status).font(.subheadline).foregroundStyle(statusColor)
-            }
-            Spacer()
-            Image(systemName: "chevron.right").font(.footnote.bold()).foregroundStyle(.tertiary)
-        }
-    }
-
-    private var status: String {
-        guard let thread else { return "Research it, ask me questions, help me finish" }
-        switch thread.status {
-        case .working: return "Working on it…"
-        case .needsInput: return "Has a question for you"
-        case .error: return "Stopped before finishing"
-        case .idle: return thread.unread ? "New reply" : "Open the conversation"
-        }
-    }
-
-    private var statusColor: Color {
-        switch thread?.status {
-        case .needsInput: .orange
-        case .error: .red
-        default: .secondary
-        }
+        await reminders.update(item, title: title, notes: notes, due: dueComponents, priority: priority,
+                               repeats: hasDate ? repeats : .never, url: url, listId: listId)
+        if let saved = reminders.item(id: itemId) { load(saved) }
     }
 }

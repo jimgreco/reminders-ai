@@ -42,6 +42,7 @@ final class AssistantStore {
         do {
             let response: SyncResponse = try await session.request("GET", "/api/sync")
             threads = Dictionary(response.threads.map { ($0.reminderId, $0) }, uniquingKeysWith: { a, _ in a })
+            lastError = nil
             guard !response.ops.isEmpty, reminders.access == .granted else { return }
             for op in response.ops {
                 var failure: String?
@@ -58,6 +59,8 @@ final class AssistantStore {
             await reminders.reload()
         } catch APIError.offline {
             // Reminders keep working offline; the next sync catches up.
+        } catch APIError.signedOut {
+            // The sign-in screen is already showing; nothing to report here.
         } catch {
             lastError = error.localizedDescription
         }

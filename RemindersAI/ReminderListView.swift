@@ -7,6 +7,8 @@ struct ReminderListView: View {
     @Environment(RemindersStore.self) private var reminders
     @Environment(AssistantStore.self) private var assistant
     @State private var showCompleted = false
+    @State private var editingList: ReminderList?
+    @State private var confirmingDeleteList = false
     @State private var newTitle = ""
     @FocusState private var addingFocused: Bool
 
@@ -15,6 +17,7 @@ struct ReminderListView: View {
         case .today: "Today"
         case .scheduled: "Scheduled"
         case .all: "All"
+        case .completed: "Completed"
         case .assistant: "Assistant"
         case .list(let id): reminders.list(id)?.title ?? "List"
         }
@@ -24,7 +27,8 @@ struct ReminderListView: View {
         switch filter {
         case .today: .blue
         case .scheduled: .red
-        case .all: .gray
+        case .all: Color(.darkGray)
+        case .completed: .gray
         case .assistant: .purple
         case .list(let id): reminders.list(id)?.color ?? .accentColor
         }
@@ -37,13 +41,20 @@ struct ReminderListView: View {
     }
 
     private var canAdd: Bool {
-        guard filter != .assistant, let id = targetListId else { return false }
+        guard filter != .assistant, filter != .completed, let id = targetListId else { return false }
         return reminders.list(id)?.isWritable ?? false
     }
 
     var body: some View {
         let items = reminders.items(for: filter, includeCompleted: showCompleted, threadIds: assistant.threadIds)
         List {
+            // The big coloured title Reminders puts at the top of a list.
+            Text(title)
+                .font(.largeTitle.bold())
+                .fontDesign(.rounded)
+                .foregroundStyle(tint)
+                .listRowSeparator(.hidden)
+                .accessibilityAddTraits(.isHeader)
             ForEach(items) { item in
                 ReminderRow(item: item, showsList: !isSingleList)
                     .swipeActions(edge: .trailing) {
@@ -52,15 +63,15 @@ struct ReminderListView: View {
                         }
                     }
                     .swipeActions(edge: .leading) {
-                        Button("Work on it", systemImage: "sparkles") {
-                            model.path.append(.thread(item.externalId))
+                        Button(item.isCompleted ? "Not Done" : "Done", systemImage: "checkmark") {
+                            Task { await reminders.setCompleted(item, !item.isCompleted) }
                         }
-                        .tint(.purple)
+                        .tint(.green)
                     }
             }
             if canAdd {
                 HStack(spacing: 12) {
-                    Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(tint)
+                    Image(systemName: "circle").font(.title3).foregroundStyle(.tertiary)
                     TextField("New Reminder", text: $newTitle)
                         .focused($addingFocused)
                         .submitLabel(.done)
@@ -78,15 +89,61 @@ struct ReminderListView: View {
                 )
             }
         }
-        .navigationTitle(title)
+        .navigationTitle("")
+        .navigationBarTitleDisplayMode(.inline)
+        .tint(tint)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu("Options", systemImage: "ellipsis.circle") {
-                    Toggle("Show Completed", systemImage: "eye", isOn: $showCompleted)
+                    if filter != .completed {
+                        Toggle("Show Completed", systemImage: "eye", isOn: $showCompleted)
+                    }
+                    if let list = editableList {
+                        Button("Show List Info", systemImage: "info.circle") { editingList = list }
+                        Button("Delete List", systemImage: "trash", role: .destructive) { confirmingDeleteList = true }
+                    }
+                }
+            }
+            if canAdd {
+                ToolbarItemGroup(placement: .bottomBar) {
+                    Button {
+                        addingFocused = true
+                    } label: {
+                        HStack(spacing: 6) {
+                            Image(systemName: "plus.circle.fill")
+                            Text("New Reminder")
+                        }
+                        .fontWeight(.semibold)
+                        .foregroundStyle(tint)
+                    }
+                    Spacer()
                 }
             }
         }
         .refreshable { await model.refresh() }
+        .sheet(item: $editingList) { ListEditor(list: $0) }
+        .confirmationDialog("Delete \u{201C}\(title)\u{201D}?", isPresented: $confirmingDeleteList, titleVisibility: .visible) {
+            Button("Delete List", role: .destructive) {
+                guard let list = editableList else { return }
+                Task {
+                    await reminders.deleteList(list)
+                    if !model.path.isEmpty { model.path.removeLast() }
+                }
+            }
+        } message: {
+            Text("This deletes all reminders in this list, in Reminders too.")
+        }
+    }
+
+    /// The list on screen, when it is one the account lets this app rename or delete.
+    private var editableList: ReminderList? {
+        guard case .list(let id) = filter, let list = reminders.list(id), list.isEditable else { return nil }
+        return list
+    }
+
+    /// Today's reminders are added due today, as in Reminders.
+    private var newDue: DateComponents? {
+        filter == .today ? DueDate.components(hasDate: true, hasTime: false, date: Date()) : nil
     }
 
     private var isSingleList: Bool {
@@ -99,7 +156,7 @@ struct ReminderListView: View {
         newTitle = ""
         guard !title.trimmingCharacters(in: .whitespaces).isEmpty else { return }
         Task {
-            await reminders.add(title: title, listId: targetListId)
+            await reminders.add(title: title, listId: targetListId, due: newDue)
             addingFocused = true
         }
     }
@@ -126,7 +183,7 @@ struct ReminderRow: View {
             .accessibilityLabel(item.isCompleted ? "Mark as not completed" : "Mark as completed")
 
             Button {
-                model.path.append(.detail(item.id))
+                model.path.append(.thread(item.externalId))
             } label: {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(alignment: .firstTextBaseline, spacing: 4) {
@@ -152,12 +209,7 @@ struct ReminderRow: View {
             .buttonStyle(.plain)
 
             if let thread = assistant.summary(for: item.externalId) {
-                Button {
-                    model.path.append(.thread(item.externalId))
-                } label: {
-                    ThreadBadge(thread: thread)
-                }
-                .buttonStyle(.plain)
+                ThreadBadge(thread: thread)
             }
         }
         .padding(.vertical, 2)
@@ -167,6 +219,7 @@ struct ReminderRow: View {
         var parts: [String] = []
         if showsList, !item.listTitle.isEmpty { parts.append(item.listTitle) }
         if let due = item.dueDate { parts.append(DueText.short(due, hasTime: item.hasDueTime)) }
+        if item.repeats != .never { parts.append(item.repeats.label) }
         return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 }
