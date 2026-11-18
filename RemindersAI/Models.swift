@@ -50,11 +50,18 @@ enum MessageRole: String, Codable, Sendable {
     }
 }
 
+/// A photo sent with a message; its image is fetched separately.
+struct Attachment: Codable, Identifiable, Equatable, Sendable {
+    var id: String
+    var mediaType: String
+}
+
 struct ThreadMessage: Codable, Identifiable, Equatable, Sendable {
     var id: String
     var role: MessageRole
     var text: String
     var options: [String]?
+    var attachments: [Attachment]?
     var createdAt: Date
 }
 
@@ -140,9 +147,16 @@ struct ReminderSnapshot: Encodable, Sendable {
     var now: String
 }
 
+struct ImageUpload: Encodable, Sendable {
+    var mediaType: String
+    /// Base64 of the image bytes.
+    var data: String
+}
+
 struct MessageRequest: Encodable, Sendable {
     var text: String
     var reminder: ReminderSnapshot
+    var images: [ImageUpload] = []
 }
 
 // MARK: Due dates and priorities

@@ -138,6 +138,34 @@ final class Session {
         try await task.value
     }
 
+    /// Bytes of an authenticated GET (a photo), refreshing the access token once on 401.
+    func data(_ path: String) async throws -> Data {
+        do {
+            return try await rawData(path, token: Keychain.read("accessToken"))
+        } catch APIError.signedOut {
+            try await refresh()
+            return try await rawData(path, token: Keychain.read("accessToken"))
+        }
+    }
+
+    private func rawData(_ path: String, token: String?) async throws -> Data {
+        guard let url = URL(string: path, relativeTo: baseURL) else { throw APIError.server(0, "Bad URL") }
+        var request = URLRequest(url: url, timeoutInterval: 45)
+        if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        let (data, response): (Data, URLResponse)
+        do {
+            (data, response) = try await urlSession.data(for: request)
+        } catch {
+            throw APIError.offline
+        }
+        switch (response as? HTTPURLResponse)?.statusCode ?? 0 {
+        case 200..<300: return data
+        case 401: throw APIError.signedOut
+        case 404: throw APIError.notFound
+        case let status: throw APIError.server(status, nil)
+        }
+    }
+
     private func raw<T: Decodable>(_ method: String, _ path: String, body: (some Encodable)?, token: String?) async throws -> T {
         guard let url = URL(string: path, relativeTo: baseURL) else { throw APIError.server(0, "Bad URL") }
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 45)

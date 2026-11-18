@@ -115,14 +115,22 @@ export class MemoryStore {
     return thread;
   }
 
-  async addMessage(threadId, role, text, options = null) {
-    const message = { id: crypto.randomUUID(), threadId, role, text, options, createdAt: new Date().toISOString() };
+  async addMessage(threadId, role, text, options = null, attachments = null) {
+    const message = { id: crypto.randomUUID(), threadId, role, text, options, attachments, createdAt: new Date().toISOString() };
     this.messages.push(message);
-    return { ...message };
+    return withoutImageData(message);
   }
 
   async listMessages(threadId) {
-    return this.messages.filter((m) => m.threadId === threadId).map((m) => ({ ...m }));
+    return this.messages.filter((m) => m.threadId === threadId).map(withoutImageData);
+  }
+
+  async getAttachment(userId, attachmentId) {
+    for (const m of this.messages) {
+      const found = (m.attachments ?? []).find((a) => a.id === attachmentId);
+      if (found && this.threads.get(m.threadId)?.userId === userId) return { ...found };
+    }
+    return null;
   }
 
   async claimEvent(threadId, eventId) {
@@ -187,7 +195,17 @@ function threadFromRow(r) {
 }
 
 function messageFromRow(r) {
-  return { id: r.id, threadId: r.thread_id, role: r.role, text: r.text, options: r.options, createdAt: iso(r.created_at) };
+  return {
+    id: r.id, threadId: r.thread_id, role: r.role, text: r.text, options: r.options,
+    attachments: r.attachments ?? null, createdAt: iso(r.created_at)
+  };
+}
+
+// Messages are listed with their photos' ids and types; the image data is
+// fetched one photo at a time.
+function withoutImageData(message) {
+  const attachments = message.attachments?.map(({ id, mediaType }) => ({ id, mediaType })) ?? null;
+  return { ...message, attachments };
 }
 
 function opFromRow(r) {
@@ -196,6 +214,10 @@ function opFromRow(r) {
     payload: r.payload, createdAt: iso(r.created_at), appliedAt: iso(r.applied_at), error: r.error
   };
 }
+
+// Every message column, with the photos' data left out.
+const MESSAGE_COLUMNS = `id, thread_id, role, text, options, created_at,
+  (SELECT jsonb_agg(a - 'data') FROM jsonb_array_elements(attachments) a) AS attachments`;
 
 const THREAD_COLUMNS = {
   title: "title", sessionId: "agent_session_id", status: "status",
@@ -329,17 +351,34 @@ export class PostgresStore {
     return rows[0] ? threadFromRow(rows[0]) : null;
   }
 
-  async addMessage(threadId, role, text, options = null) {
+  async addMessage(threadId, role, text, options = null, attachments = null) {
     const { rows } = await this.pool.query(
-      "INSERT INTO rai_messages (id, thread_id, role, text, options) VALUES ($1, $2, $3, $4, $5) RETURNING *",
-      [crypto.randomUUID(), threadId, role, text, options === null ? null : JSON.stringify(options)]
+      `INSERT INTO rai_messages (id, thread_id, role, text, options, attachments) VALUES ($1, $2, $3, $4, $5, $6)
+       RETURNING ${MESSAGE_COLUMNS}`,
+      [crypto.randomUUID(), threadId, role, text, options === null ? null : JSON.stringify(options),
+        attachments === null ? null : JSON.stringify(attachments)]
     );
     return messageFromRow(rows[0]);
   }
 
   async listMessages(threadId) {
-    const { rows } = await this.pool.query("SELECT * FROM rai_messages WHERE thread_id = $1 ORDER BY seq", [threadId]);
+    const { rows } = await this.pool.query(
+      `SELECT ${MESSAGE_COLUMNS} FROM rai_messages WHERE thread_id = $1 ORDER BY seq`, [threadId]
+    );
     return rows.map(messageFromRow);
+  }
+
+  async getAttachment(userId, attachmentId) {
+    const { rows } = await this.pool.query(
+      `SELECT a.value AS attachment
+         FROM rai_messages m
+         JOIN rai_threads t ON t.id = m.thread_id
+         CROSS JOIN LATERAL jsonb_array_elements(m.attachments) a
+        WHERE t.user_id = $1 AND m.attachments IS NOT NULL AND a.value->>'id' = $2
+        LIMIT 1`,
+      [userId, attachmentId]
+    );
+    return rows[0]?.attachment ?? null;
   }
 
   async claimEvent(threadId, eventId) {

@@ -112,7 +112,7 @@ jobs:
         project: RemindersAI.xcodeproj
         scheme: RemindersAI
         extra-build-settings: |
-          PROVISIONING_PROFILE_SPECIFIER=@MAC_PROFILE_UUID:app@
+          MAC_PROFILE_NAME=@MAC_PROFILE_UUID:app@
           GIT_COMMIT_HASH=@GIT_SHA7@
           API_BASE_URL=@ENV:API_BASE_URL@
           GOOGLE_CLIENT_ID=@ENV:GOOGLE_CLIENT_ID@

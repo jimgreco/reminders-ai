@@ -19,6 +19,7 @@
 		618F980C55D68E35B77FF320 /* AssistantStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7E8BF6462D591E48AF9D5E2 /* AssistantStore.swift */; };
 		6237F9170224120988428DA2 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 9241E15F9406A2D680B22148 /* PrivacyInfo.xcprivacy */; };
 		7E93EBB24DF4122C0C452178 /* RemindersAIApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5208B95237413D61D0F20768 /* RemindersAIApp.swift */; };
+		8FAF5DA81AE68F9DF75665CF /* Photos.swift in Sources */ = {isa = PBXBuildFile; fileRef = A25E00A8FACF4CAD14217E7A /* Photos.swift */; };
 		9AB8E933371595FD52BE0BCC /* RemindersStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = B435FC6061D2E10464441BB8 /* RemindersStore.swift */; };
 		BB79345024D78C3B25BBE986 /* SelectableText.swift in Sources */ = {isa = PBXBuildFile; fileRef = B43ADD59D77B11E2528D8117 /* SelectableText.swift */; };
 		E7E52EF9C021F11BDD6D1D88 /* ThreadView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 06AB0A3FF468250D7BDA7625 /* ThreadView.swift */; };
@@ -48,6 +49,7 @@
 		820554FD7465C90B93A94082 /* Session.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Session.swift; sourceTree = "<group>"; };
 		8EA19AF72B5719D4A976D3B1 /* SignInView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignInView.swift; sourceTree = "<group>"; };
 		9241E15F9406A2D680B22148 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
+		A25E00A8FACF4CAD14217E7A /* Photos.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Photos.swift; sourceTree = "<group>"; };
 		B435FC6061D2E10464441BB8 /* RemindersStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemindersStore.swift; sourceTree = "<group>"; };
 		B43ADD59D77B11E2528D8117 /* SelectableText.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SelectableText.swift; sourceTree = "<group>"; };
 		B8C9A5CACD1C85CF76DC530A /* ReminderDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReminderDetailView.swift; sourceTree = "<group>"; };
@@ -96,6 +98,7 @@
 				39C08C450B47D3A6C2566798 /* Info.plist */,
 				0306760B0636B04419AC165F /* Keychain.swift */,
 				25DAD554053EE6D6334B8C16 /* Models.swift */,
+				A25E00A8FACF4CAD14217E7A /* Photos.swift */,
 				9241E15F9406A2D680B22148 /* PrivacyInfo.xcprivacy */,
 				B8C9A5CACD1C85CF76DC530A /* ReminderDetailView.swift */,
 				CF2A4D96DB3092E3032E28B7 /* ReminderListView.swift */,
@@ -220,6 +223,7 @@
 				20C985205FDE0393BCBE4390 /* HomeView.swift in Sources */,
 				3B13DB82C51BEFF215E3AF0A /* Keychain.swift in Sources */,
 				0EBECEABADA609CAAB9E8786 /* Models.swift in Sources */,
+				8FAF5DA81AE68F9DF75665CF /* Photos.swift in Sources */,
 				FB2843FEFD6BCE03BD37E888 /* ReminderDetailView.swift in Sources */,
 				209D862A03106791E5500E14 /* ReminderListView.swift in Sources */,
 				7E93EBB24DF4122C0C452178 /* RemindersAIApp.swift in Sources */,
@@ -380,6 +384,7 @@
 				MACOSX_DEPLOYMENT_TARGET = 26.0;
 				PRODUCT_BUNDLE_IDENTIFIER = com.jimgreco.remindersai;
 				"PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]" = "$(IOS_PROFILE_NAME)";
+				"PROVISIONING_PROFILE_SPECIFIER[sdk=macosx*]" = "$(MAC_PROFILE_NAME)";
 				SDKROOT = iphoneos;
 				SUPPORTS_MACCATALYST = YES;
 				TARGETED_DEVICE_FAMILY = 1;

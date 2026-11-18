@@ -49,6 +49,9 @@ targets:
           CODE_SIGN_STYLE: Manual
           CODE_SIGN_IDENTITY: Apple Distribution
           "PROVISIONING_PROFILE_SPECIFIER[sdk=iphoneos*]": "$(IOS_PROFILE_NAME)"
+          # Set on the app target only: as a command-line setting it would also
+          # reach the Swift package targets, which take no profile.
+          "PROVISIONING_PROFILE_SPECIFIER[sdk=macosx*]": "$(MAC_PROFILE_NAME)"
     scheme:
       testTargets:
         - RemindersAITests

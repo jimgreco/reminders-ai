@@ -20,6 +20,7 @@ final class AssistantStore {
     func summary(for reminderId: String) -> ThreadSummary? { threads[reminderId] }
 
     func reset() {
+        AttachmentImages.shared.clear()
         threads = [:]
         details = [:]
         sending = []
@@ -84,18 +85,24 @@ final class AssistantStore {
         }
     }
 
-    func send(_ text: String, about item: ReminderItem, session: Session) async {
+    /// Sends a message, with any photos as JPEGs. Returns false when it could not be sent.
+    @discardableResult
+    func send(_ text: String, photos: [Data] = [], about item: ReminderItem, session: Session) async -> Bool {
         let id = item.externalId
         sending.insert(id)
         defer { sending.remove(id) }
         do {
+            let images = photos.map { ImageUpload(mediaType: "image/jpeg", data: $0.base64EncodedString()) }
             let detail: ThreadDetail = try await session.request(
-                "POST", APIPath.thread(id, "/messages"), body: MessageRequest(text: text, reminder: item.snapshot())
+                "POST", APIPath.thread(id, "/messages"),
+                body: MessageRequest(text: text, reminder: item.snapshot(), images: images)
             )
             store(detail)
             lastError = nil
+            return true
         } catch {
             lastError = error.localizedDescription
+            return false
         }
     }
 
