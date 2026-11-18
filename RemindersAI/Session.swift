@@ -63,6 +63,10 @@ final class Session {
         await authenticate(path: "/auth/apple", body: ["identityToken": token])
     }
 
+    func signInWithGoogle(idToken: String) async {
+        await authenticate(path: "/auth/google", body: ["idToken": idToken])
+    }
+
     #if DEBUG
     func devSignIn() async {
         await authenticate(path: "/auth/dev", body: ["email": "dev@example.test"])

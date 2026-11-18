@@ -1,4 +1,4 @@
-# Reminders AI
+# Task Sidekick (reminders-ai)
 
 Apple Reminders with an assistant in every item. The app looks and works like
 Reminders, and Reminders stays the only store of tasks. Open an item and ask
@@ -9,7 +9,7 @@ up whenever you return.
 ```
  iPhone app (SwiftUI)                         server (EC2, tasks.jim-greco.com)
  ┌───────────────────────────────┐   HTTPS   ┌──────────────────────────────────────┐
- │ EventKit: lists and reminders │ ────────► │ Sign in with Apple, one account      │
+ │ EventKit: lists and reminders │ ────────► │ Sign in with Apple or Google, owner  │
  │ thread view, questions        │           │ threads, messages, queued edits      │──► Postgres
  │ applies the assistant's edits │ ◄──────── │ APNs push when a turn settles        │
  └───────────────────────────────┘   push    └──────────────────┬───────────────────┘
@@ -86,6 +86,7 @@ xcodebuild -project RemindersAI.xcodeproj -scheme RemindersAI -destination 'plat
 | `DATABASE_URL` | `reminders_ai_runtime` connection. Required in production. |
 | `SESSION_SECRET` | ≥ 32 chars, signs 15-minute access tokens. |
 | `APPLE_BUNDLE_ID` | `com.jimgreco.remindersai`: the Apple identity-token audience and the push topic. |
+| `GOOGLE_CLIENT_ID` | The iOS Google OAuth client id, the Google identity-token audience. Unset turns Google sign-in off. |
 | `ALLOWED_EMAILS` / `ALLOWED_APPLE_SUBS` | Who may sign in. One is required in production. |
 | `ANTHROPIC_API_KEY`, `AGENT_ID`, `AGENT_ENVIRONMENT_ID` | The Claude agent. The two ids are required in production. |
 | `SESSION_BUDGET_CENTS` | Spending cap per agent session at list prices. Default 500; 0 for none. |

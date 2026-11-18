@@ -3,6 +3,10 @@ options:
   bundleIdPrefix: com.jimgreco
   deploymentTarget:
     iOS: "26.0"
+packages:
+  GoogleSignIn:
+    url: https://github.com/google/GoogleSignIn-iOS
+    from: 7.1.0
 settings:
   base:
     SWIFT_VERSION: "5.0"
@@ -16,12 +20,17 @@ targets:
     platform: iOS
     sources:
       - path: RemindersAI
+    dependencies:
+      - package: GoogleSignIn
+        product: GoogleSignIn
     settings:
       base:
         PRODUCT_BUNDLE_IDENTIFIER: com.jimgreco.remindersai
         GENERATE_INFOPLIST_FILE: NO
         INFOPLIST_FILE: RemindersAI/Info.plist
         API_BASE_URL: http://127.0.0.1:8792
+        GOOGLE_CLIENT_ID: YOUR_GOOGLE_IOS_CLIENT_ID.apps.googleusercontent.com
+        GOOGLE_REVERSED_CLIENT_ID: com.googleusercontent.apps.YOUR_GOOGLE_IOS_CLIENT_ID
         CODE_SIGN_ENTITLEMENTS: RemindersAI/RemindersAI.entitlements
         APS_ENVIRONMENT: development
         TARGETED_DEVICE_FAMILY: "1"

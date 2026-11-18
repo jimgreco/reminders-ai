@@ -1,3 +1,4 @@
+import GoogleSignIn
 import SwiftUI
 import UIKit
 import UserNotifications
@@ -41,6 +42,9 @@ final class AppDelegate: NSObject, UIApplicationDelegate, UNUserNotificationCent
     func application(_ application: UIApplication,
                      didFinishLaunchingWithOptions launchOptions: [UIApplication.LaunchOptionsKey: Any]? = nil) -> Bool {
         UNUserNotificationCenter.current().delegate = self
+        if let clientID = GoogleConfig.clientID {
+            GIDSignIn.sharedInstance.configuration = GIDConfiguration(clientID: clientID)
+        }
         return true
     }
 
@@ -88,11 +92,21 @@ struct RemindersAIApp: App {
                 .environment(model.session)
                 .environment(model.reminders)
                 .environment(model.assistant)
+                .onOpenURL { _ = GIDSignIn.sharedInstance.handle($0) }
                 .onChange(of: scenePhase, initial: true) { _, phase in
                     guard phase == .active, model.session.isSignedIn else { return }
                     Task { await model.refresh() }
                 }
         }
+    }
+}
+
+enum GoogleConfig {
+    /// The iOS OAuth client id, or nil while project.yml still has its placeholder.
+    static var clientID: String? {
+        guard let id = Bundle.main.object(forInfoDictionaryKey: "GIDClientID") as? String,
+              !id.isEmpty, !id.hasPrefix("YOUR_") else { return nil }
+        return id
     }
 }
 

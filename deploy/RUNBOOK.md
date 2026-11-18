@@ -1,29 +1,42 @@
-# Turning on Reminders AI
+# Turning on Task Sidekick (reminders-ai)
 
 All steps are the owner's. Nothing here prints a secret; keep it that way.
 
-## 1. Apple
+## 1. Apple and Google
 
-1. Developer portal: App ID `com.jimgreco.remindersai` with **Sign in with
-   Apple** and **Push Notifications**.
-2. App Store distribution provisioning profile for it, signed by the existing
-   distribution certificate.
-3. Keys: an **APNs** auth key (.p8). One key works for every app on the team;
-   note its Key ID.
-4. App Store Connect: a new app record for the bundle ID. "Reminders AI" is a
-   working name: Apple rejects an upload whose home-screen or bundle name
-   (`CFBundleDisplayName`, `CFBundleName` in `RemindersAI/Info.plist`) is taken
-   (ITMS-90129), and may object to "Reminders" in a name. Pick the real name
-   here and change both plist keys to match. Add yourself to an internal
-   TestFlight group.
-5. Fill `appId`, `profiles.app.uuid`, `profiles.app.name` and `groups[0].id` in
-   `.github/scripts/release-policy.json` (they are `FILL_IN_…` until then, and
-   the TestFlight job fails on them by design).
-6. Repository secrets (environment `production`): the TestFlight set from the
-   app standard, the server release set, and
-   `IOS_API_BASE_URL=https://tasks.jim-greco.com`.
+Done on 2026-11-18 (kept here as the record of what exists):
+
+- App ID `com.jimgreco.remindersai` with **Sign in with Apple** and **Push
+  Notifications**.
+- Profile "Reminders AI App Store" (App Store distribution, existing
+  distribution certificate); its UUID is in `release-policy.json`.
+- App Store Connect record **Task Sidekick** (app id `6836446337`; "Reminders
+  AI" was taken), internal TestFlight group "Family" with the owner in it. The
+  home-screen name in `RemindersAI/Info.plist` matches the store name
+  (ITMS-90129 rejects a taken one).
+- APNs: the topic `com.jimgreco.remindersai` was added to the existing key
+  `VQPG55B3R4` ("Week of Us Push Notifications", production only). Use that
+  key's `.p8` for `APNS_PRIVATE_KEY`.
+
+- Google Cloud (project CREAM): iOS OAuth client "Task Sidekick iOS" for the
+  bundle ID. Client id
+  `1018348991868-0ebtpdb7o8bt8vimj3ftbden3ivom3vu.apps.googleusercontent.com`
+  (not a secret). For local device builds, put it and its reversed form in
+  `project.yml`.
+- Repository secrets already set: `IOS_API_BASE_URL`, `GOOGLE_IOS_CLIENT_ID`,
+  `GOOGLE_IOS_REVERSED_CLIENT_ID`.
+
+Still to do: the remaining repository secrets, which only you hold: the
+TestFlight set from the app standard (`IOS_DIST_CERT_P12`,
+`IOS_DIST_CERT_PASSWORD`, `KEYCHAIN_PASSWORD`, `APP_STORE_CONNECT_KEY_ID`,
+`APP_STORE_CONNECT_ISSUER_ID`, `APP_STORE_CONNECT_API_KEY`) and the server
+release set (`EC2_HOST`, `EC2_USER`, `EC2_SSH_KEY`, `EC2_SSH_KNOWN_HOSTS`).
 
 ## 2. Claude
+
+The agent and its environment were created on 2026-11-18 with unrestricted
+networking: `AGENT_ID=agent_01QX7fJYEJmAKUhUrLemaRyK`,
+`AGENT_ENVIRONMENT_ID=env_01EMJciDTDcQ5iv3bgKWGwNz` (not secrets). To recreate:
 
 1. Console: an API key for this app, in its own workspace if you want its spend
    separate.
@@ -78,12 +91,13 @@ NODE_ENV=production
 DATABASE_URL=postgresql://reminders_ai_runtime:$RUNTIME_PW@shared_db:5432/reminders_ai
 SESSION_SECRET=$(openssl rand -hex 32)
 APPLE_BUNDLE_ID=com.jimgreco.remindersai
-ALLOWED_EMAILS=<your Apple ID email>
+GOOGLE_CLIENT_ID=1018348991868-0ebtpdb7o8bt8vimj3ftbden3ivom3vu.apps.googleusercontent.com
+ALLOWED_EMAILS=<your Google and/or Apple ID email>
 TRUST_PROXY_HOPS=1
-ANTHROPIC_API_KEY=<from step 2.1>
-AGENT_ID=<from step 2.2>
-AGENT_ENVIRONMENT_ID=<from step 2.2>
-APNS_KEY_ID=<from step 1.3>
+ANTHROPIC_API_KEY=<your Claude API key>
+AGENT_ID=agent_01QX7fJYEJmAKUhUrLemaRyK
+AGENT_ENVIRONMENT_ID=env_01EMJciDTDcQ5iv3bgKWGwNz
+APNS_KEY_ID=VQPG55B3R4
 APNS_TEAM_ID=V6JPQCD336
 APNS_PRIVATE_KEY=<the .p8 contents on one line, newlines written as \n>
 EOT

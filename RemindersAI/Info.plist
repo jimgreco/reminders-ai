@@ -5,7 +5,7 @@
 	<key>API_BASE_URL</key>
 	<string>$(API_BASE_URL)</string>
 	<key>CFBundleDisplayName</key>
-	<string>Reminders AI</string>
+	<string>Task Sidekick</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -13,13 +13,26 @@
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
-	<string>Reminders AI</string>
+	<string>Task Sidekick</string>
 	<key>CFBundlePackageType</key>
 	<string>$(PRODUCT_BUNDLE_PACKAGE_TYPE)</string>
 	<key>CFBundleShortVersionString</key>
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleTypeRole</key>
+			<string>Editor</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>$(GOOGLE_REVERSED_CLIENT_ID)</string>
+			</array>
+		</dict>
+	</array>
+	<key>GIDClientID</key>
+	<string>$(GOOGLE_CLIENT_ID)</string>
 	<key>GitCommitHash</key>
 	<string>$(GIT_COMMIT_HASH)</string>
 	<key>ITSAppUsesNonExemptEncryption</key>
@@ -30,7 +43,7 @@
 		<true/>
 	</dict>
 	<key>NSRemindersFullAccessUsageDescription</key>
-	<string>Reminders AI shows and edits your Apple Reminders. A reminder's details are sent to the assistant only when you ask it to work on that reminder.</string>
+	<string>Task Sidekick shows and edits your Apple Reminders. A reminder's details are sent to the assistant only when you ask it to work on that reminder.</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

@@ -15,6 +15,7 @@
 		3B13DB82C51BEFF215E3AF0A /* Keychain.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0306760B0636B04419AC165F /* Keychain.swift */; };
 		478F1ADD055FDBA64D977602 /* Session.swift in Sources */ = {isa = PBXBuildFile; fileRef = 820554FD7465C90B93A94082 /* Session.swift */; };
 		4D7A72E55A8490C270652BF6 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 2138B1A773D012EE4506B986 /* Assets.xcassets */; };
+		5894B1699C887E2F3DBD53A2 /* GoogleSignIn in Frameworks */ = {isa = PBXBuildFile; productRef = C0FC119A5F0136303DDB13A5 /* GoogleSignIn */; };
 		618F980C55D68E35B77FF320 /* AssistantStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = E7E8BF6462D591E48AF9D5E2 /* AssistantStore.swift */; };
 		6237F9170224120988428DA2 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 9241E15F9406A2D680B22148 /* PrivacyInfo.xcprivacy */; };
 		7E93EBB24DF4122C0C452178 /* RemindersAIApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 5208B95237413D61D0F20768 /* RemindersAIApp.swift */; };
@@ -53,6 +54,17 @@
 		CF2A4D96DB3092E3032E28B7 /* ReminderListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ReminderListView.swift; sourceTree = "<group>"; };
 		E7E8BF6462D591E48AF9D5E2 /* AssistantStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AssistantStore.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		67E969F6514A2AFD84EB7D7F /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				5894B1699C887E2F3DBD53A2 /* GoogleSignIn in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
 		8758FC5EB9FFA1C0399786D2 /* Products */ = {
@@ -130,6 +142,7 @@
 			buildPhases = (
 				1B842A7872F1B64991DD0F0E /* Sources */,
 				85082BBC465328ED60011A02 /* Resources */,
+				67E969F6514A2AFD84EB7D7F /* Frameworks */,
 			);
 			buildRules = (
 			);
@@ -137,6 +150,7 @@
 			);
 			name = RemindersAI;
 			packageProductDependencies = (
+				C0FC119A5F0136303DDB13A5 /* GoogleSignIn */,
 			);
 			productName = RemindersAI;
 			productReference = C4FB64442835393953EAA0B4 /* RemindersAI.app */;
@@ -168,6 +182,9 @@
 			);
 			mainGroup = 906F5633CE431E85FA93B56C;
 			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				B31DC40EE67F527D7E969662 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */,
+			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 8758FC5EB9FFA1C0399786D2 /* Products */;
 			projectDirPath = "";
@@ -298,6 +315,8 @@
 				CODE_SIGN_ENTITLEMENTS = RemindersAI/RemindersAI.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				GENERATE_INFOPLIST_FILE = NO;
+				GOOGLE_CLIENT_ID = YOUR_GOOGLE_IOS_CLIENT_ID.apps.googleusercontent.com;
+				GOOGLE_REVERSED_CLIENT_ID = com.googleusercontent.apps.YOUR_GOOGLE_IOS_CLIENT_ID;
 				INFOPLIST_FILE = RemindersAI/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -337,6 +356,8 @@
 				CODE_SIGN_IDENTITY = "Apple Distribution";
 				CODE_SIGN_STYLE = Manual;
 				GENERATE_INFOPLIST_FILE = NO;
+				GOOGLE_CLIENT_ID = YOUR_GOOGLE_IOS_CLIENT_ID.apps.googleusercontent.com;
+				GOOGLE_REVERSED_CLIENT_ID = com.googleusercontent.apps.YOUR_GOOGLE_IOS_CLIENT_ID;
 				INFOPLIST_FILE = RemindersAI/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
@@ -465,6 +486,25 @@
 			defaultConfigurationName = Debug;
 		};
 /* End XCConfigurationList section */
+
+/* Begin XCRemoteSwiftPackageReference section */
+		B31DC40EE67F527D7E969662 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */ = {
+			isa = XCRemoteSwiftPackageReference;
+			repositoryURL = "https://github.com/google/GoogleSignIn-iOS";
+			requirement = {
+				kind = upToNextMajorVersion;
+				minimumVersion = 7.1.0;
+			};
+		};
+/* End XCRemoteSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		C0FC119A5F0136303DDB13A5 /* GoogleSignIn */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = B31DC40EE67F527D7E969662 /* XCRemoteSwiftPackageReference "GoogleSignIn-iOS" */;
+			productName = GoogleSignIn;
+		};
+/* End XCSwiftPackageProductDependency section */
 	};
 	rootObject = E1DE0BCD2620C225FF04FA0C /* Project object */;
 }

@@ -1,6 +1,6 @@
 {
   "app": "reminders-ai",
-  "appId": "FILL_IN_APP_STORE_CONNECT_APP_ID",
+  "appId": "6836446337",
   "bundleId": "com.jimgreco.remindersai",
   "teamId": "V6JPQCD336",
   "certificateSha256": "7fb57dbf0cd7923f9ba97d8801824de79e1ba235dbe78d4a821f8195c30f0bf8",
@@ -10,7 +10,7 @@
   ],
   "groups": [
     {
-      "id": "FILL_IN_TESTFLIGHT_GROUP_ID",
+      "id": "c9a5f35a-66bc-489d-8766-6ab14660bc9d",
       "name": "Family",
       "internal": true,
       "testers": 1,
@@ -19,7 +19,7 @@
   ],
   "profiles": {
     "app": {
-      "uuid": "FILL_IN_PROFILE_UUID",
+      "uuid": "86b8d6e6-5991-4496-9fcc-9797db6aef2e",
       "name": "Reminders AI App Store",
       "bundleId": "com.jimgreco.remindersai",
       "groups": [],
