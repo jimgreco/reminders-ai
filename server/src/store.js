@@ -56,6 +56,13 @@ export class MemoryStore {
     return { userId: session.userId };
   }
 
+  async retireSession(tokenHash, graceUntil) {
+    const session = this.sessions.get(tokenHash);
+    if (!session || session.expiresAt <= new Date()) return null;
+    if (graceUntil < session.expiresAt) session.expiresAt = new Date(graceUntil);
+    return { userId: session.userId };
+  }
+
   async deleteUser(userId) {
     this.users.delete(userId);
     for (const [key, id] of this.identities) if (id === userId) this.identities.delete(key);
@@ -324,6 +331,15 @@ export class PostgresStore {
     );
     if (!rows[0] || new Date(rows[0].expires_at) <= new Date()) return null;
     return { userId: rows[0].user_id };
+  }
+
+  async retireSession(tokenHash, graceUntil) {
+    const { rows } = await this.pool.query(
+      `UPDATE rai_sessions SET expires_at = LEAST(expires_at, $2)
+        WHERE token_hash = $1 AND expires_at > now() RETURNING user_id`,
+      [tokenHash, graceUntil]
+    );
+    return rows[0] ? { userId: rows[0].user_id } : null;
   }
 
   async deleteUser(userId) {

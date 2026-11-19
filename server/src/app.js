@@ -4,7 +4,12 @@ import appleSignin from "apple-signin-auth";
 import { OAuth2Client } from "google-auth-library";
 
 const ACCESS_TTL_MS = 15 * 60_000;
-const REFRESH_TTL_MS = 120 * 24 * 60 * 60_000;
+// Sign-in lasts until you sign out: each refresh extends it, and an idle
+// phone still has years before it would have to sign in again.
+const REFRESH_TTL_MS = 10 * 365 * 24 * 60 * 60_000;
+// A refreshed-away token keeps working this long, so a reply lost when iOS
+// suspends the app mid-refresh doesn't sign the phone out.
+const REFRESH_GRACE_MS = 24 * 60 * 60_000;
 const MAX_BODY_BYTES = 256 * 1024;
 export const LIMITS = {
   messageChars: 8000, titleChars: 500, notesChars: 20_000,
@@ -335,7 +340,7 @@ export function createApp({ store, config, assistant, planner = null, verifyAppl
       if (retry) return send(response, 429, { error: "rate limited" }, { "retry-after": String(retry) });
       const body = await readJSON(request);
       const session = typeof body.refreshToken === "string" && body.refreshToken.length <= 200
-        ? await store.takeSession(sha256Hex(body.refreshToken))
+        ? await store.retireSession(sha256Hex(body.refreshToken), new Date(now().getTime() + REFRESH_GRACE_MS))
         : null;
       const user = session ? await store.getUser(session.userId) : null;
       if (!user) return send(response, 401, { error: "invalid refresh token" });

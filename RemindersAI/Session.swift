@@ -44,8 +44,20 @@ final class Session {
     init(baseURL: URL = Session.configuredBaseURL, urlSession: URLSession = .shared) {
         self.baseURL = baseURL
         self.urlSession = urlSession
-        isSignedIn = Keychain.read("refreshToken") != nil
+        Keychain.upgradeAccessibility(Session.tokenKeys)
+        // Unreadable isn't the same as missing: assume still signed in.
+        isSignedIn = Keychain.lookup("refreshToken") != .missing
         email = Keychain.read("email")
+    }
+
+    private static let tokenKeys = ["accessToken", "refreshToken", "email"]
+
+    /// Re-reads the Keychain when the app comes forward, in case it launched
+    /// before the phone was first unlocked.
+    func resume() {
+        Keychain.upgradeAccessibility(Session.tokenKeys)
+        if !isSignedIn, Keychain.read("refreshToken") != nil { isSignedIn = true }
+        if email == nil { email = Keychain.read("email") }
     }
 
     nonisolated static var configuredBaseURL: URL {
@@ -123,7 +135,14 @@ final class Session {
         if let refreshTask { return try await refreshTask.value }
         let task = Task { @MainActor in
             defer { self.refreshTask = nil }
-            guard let refresh = Keychain.read("refreshToken") else {
+            let refresh: String
+            switch Keychain.lookup("refreshToken") {
+            case .value(let value):
+                refresh = value
+            case .unavailable:
+                // Locked since a restart: keep the sign-in and try again later.
+                throw APIError.offline
+            case .missing:
                 self.clearTokens()
                 throw APIError.signedOut
             }
