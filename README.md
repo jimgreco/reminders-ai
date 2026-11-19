@@ -46,12 +46,19 @@ any assistant conversation) to `POST /api/plan`. One Claude call
 why, a first step, and, where the assistant can help, the message that starts
 it. The server stores none of it; the plan is kept on the device for the day.
 
+Checking a pick off hides it for the rest of the day, repeating reminders
+included. **Dismiss** leaves a reminder out for today, a week, a month, or for
+good; dismissals are stored on the server by reminder id
+(`/api/plan/dismissals`), so they apply on every device and the server drops
+those reminders before Claude sees the list. **Not Suggesting** at the bottom of
+the plan lists them, with Restore.
+
 ## What is stored where
 
 | Where | What |
 |---|---|
 | Apple Reminders | every task: title, notes, dates, completion. Nothing is cached elsewhere. |
-| Server database | each thread's messages, the edits waiting for the iPhone, push tokens, sign-in sessions. A reminder's details reach the server only when you message the assistant about it or plan your day (a plan is not stored). |
+| Server database | each thread's messages, the edits waiting for the iPhone, push tokens, sign-in sessions, and which reminder ids are dismissed from Plan My Day and until when. A reminder's details reach the server only when you message the assistant about it or plan your day (a plan is not stored). |
 | Anthropic | each session's conversation, until the session is deleted. |
 | iPhone Keychain | session tokens, this device only. |
 

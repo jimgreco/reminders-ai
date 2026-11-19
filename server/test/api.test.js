@@ -357,6 +357,34 @@ function suite(name, makeStore) {
       assert.deepEqual(empty.body.suggestions, []);
     });
 
+    test("dismissed reminders are left out of the plan until their time is up", async () => {
+      const path = (id) => `/api/plan/dismissals/${encodeURIComponent(id)}`;
+      const soon = new Date(Date.now() + 60 * 60_000).toISOString();
+      let r = await app.call("PUT", path("D-1/x"), { token, body: { until: soon } });
+      assert.equal(r.status, 200);
+      assert.equal(r.body.reminderId, "D-1/x");
+      r = await app.call("PUT", path("D-2"), { token, body: { until: null } });
+      assert.equal(r.status, 200);
+      assert.equal(r.body.until, null);
+      assert.equal((await app.call("PUT", path("D-3"), { token, body: { until: "2000-01-01T00:00:00Z" } })).status, 400);
+      assert.equal((await app.call("PUT", path("D-3"), { token, body: { until: "soon" } })).status, 400);
+      assert.equal((await app.call("GET", "/api/plan/dismissals", {})).status, 401);
+
+      r = await app.call("GET", "/api/plan/dismissals", { token });
+      assert.deepEqual(r.body.dismissals.map((d) => d.reminderId).sort(), ["D-1/x", "D-2"]);
+      assert.equal(new Date(r.body.dismissals.find((d) => d.reminderId === "D-1/x").until).toISOString(), soon);
+
+      const reminders = [{ id: "D-1/x", title: "Dismissed for an hour" }, { id: "D-2", title: "Dismissed for good" }, { id: "D-4", title: "Still in" }];
+      r = await app.call("POST", "/api/plan", { token, body: { reminders } });
+      assert.deepEqual(r.body.suggestions.map((s) => s.reminderId), ["D-4"]);
+      assert.ok(!app.planClient.requests.at(-1).messages[0].content.includes("Dismissed"));
+
+      assert.equal((await app.call("DELETE", path("D-2"), { token })).status, 200);
+      r = await app.call("GET", "/api/plan/dismissals", { token });
+      assert.deepEqual(r.body.dismissals.map((d) => d.reminderId), ["D-1/x"]);
+      await app.call("DELETE", path("D-1/x"), { token });
+    });
+
     test("a plan that names unknown reminders keeps only real ones", async () => {
       const planner = new Planner({ client: { messages: { create: async () => ({
         stop_reason: "end_turn",

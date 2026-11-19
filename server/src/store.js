@@ -7,6 +7,7 @@ import pg from "pg";
 // Thread:  { id, userId, reminderId, title, sessionId, status, pendingToolUseId, unread, createdAt, updatedAt }
 // Message: { id, threadId, role, text, options, createdAt }
 // Op:      { id, userId, threadId, reminderId, kind, payload, createdAt, appliedAt, error }
+// Dismissal: { reminderId, until (ISO string, or null for good) }; listed only while in force
 
 const THREAD_FIELDS = ["title", "sessionId", "status", "pendingToolUseId", "unread"];
 
@@ -20,6 +21,7 @@ export class MemoryStore {
     this.seen = new Set();
     this.ops = [];
     this.devices = new Map();
+    this.dismissals = new Map();
   }
 
   async upsertUserByIdentity({ provider, subject, email, emailVerified }) {
@@ -60,6 +62,7 @@ export class MemoryStore {
     for (const [hash, s] of this.sessions) if (s.userId === userId) this.sessions.delete(hash);
     for (const [id, t] of this.threads) if (t.userId === userId) await this.#dropThread(id);
     for (const [token, d] of this.devices) if (d.userId === userId) this.devices.delete(token);
+    this.dismissals.delete(userId);
   }
 
   async #dropThread(id) {
@@ -186,6 +189,23 @@ export class MemoryStore {
 
   async deleteDevice(token) {
     this.devices.delete(token);
+  }
+
+  async listDismissals(userId, now = new Date()) {
+    const mine = this.dismissals.get(userId) ?? new Map();
+    return [...mine.entries()]
+      .filter(([, until]) => until === null || new Date(until) > now)
+      .map(([reminderId, until]) => ({ reminderId, until }));
+  }
+
+  async setDismissal(userId, reminderId, until) {
+    if (!this.dismissals.has(userId)) this.dismissals.set(userId, new Map());
+    this.dismissals.get(userId).set(reminderId, until);
+    return { reminderId, until };
+  }
+
+  async deleteDismissal(userId, reminderId) {
+    return this.dismissals.get(userId)?.delete(reminderId) ?? false;
   }
 
   async health() {
@@ -468,6 +488,31 @@ export class PostgresStore {
 
   async deleteDevice(token) {
     await this.pool.query("DELETE FROM rai_devices WHERE token = $1", [token]);
+  }
+
+  async listDismissals(userId, now = new Date()) {
+    const { rows } = await this.pool.query(
+      `SELECT reminder_id, dismissed_until FROM rai_plan_dismissals
+       WHERE user_id = $1 AND (dismissed_until IS NULL OR dismissed_until > $2)
+       ORDER BY created_at`, [userId, now]
+    );
+    return rows.map((r) => ({ reminderId: r.reminder_id, until: r.dismissed_until ? new Date(r.dismissed_until).toISOString() : null }));
+  }
+
+  async setDismissal(userId, reminderId, until) {
+    await this.pool.query(
+      `INSERT INTO rai_plan_dismissals (user_id, reminder_id, dismissed_until) VALUES ($1, $2, $3)
+       ON CONFLICT (user_id, reminder_id) DO UPDATE SET dismissed_until = EXCLUDED.dismissed_until, created_at = now()`,
+      [userId, reminderId, until]
+    );
+    return { reminderId, until };
+  }
+
+  async deleteDismissal(userId, reminderId) {
+    const { rowCount } = await this.pool.query(
+      "DELETE FROM rai_plan_dismissals WHERE user_id = $1 AND reminder_id = $2", [userId, reminderId]
+    );
+    return rowCount > 0;
   }
 
   async health() {
