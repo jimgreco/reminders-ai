@@ -53,12 +53,16 @@ final class PlannerStore {
     private(set) var started: Set<String> = []
 
     private static let key = "dayPlan"
+    /// The saved plan's own format. The API coders don't round-trip dates:
+    /// the encoder writes a number and the decoder expects an ISO string.
+    private static let storeEncoder = JSONEncoder()
+    private static let storeDecoder = JSONDecoder()
     /// The longest list sent; the earliest due and highest priority go first.
     static let maxReminders = 400
 
     init() {
         if let data = UserDefaults.standard.data(forKey: Self.key),
-           let saved = try? JSONCoding.decoder.decode(DayPlan.self, from: data),
+           let saved = try? Self.storeDecoder.decode(DayPlan.self, from: data),
            Calendar.current.isDateInToday(saved.madeAt) {
             plan = saved
         }
@@ -91,7 +95,7 @@ final class PlannerStore {
             plan = made
             started = []
             lastError = nil
-            if let data = try? JSONCoding.encoder.encode(made) { UserDefaults.standard.set(data, forKey: Self.key) }
+            if let data = try? Self.storeEncoder.encode(made) { UserDefaults.standard.set(data, forKey: Self.key) }
         } catch APIError.offline {
             lastError = "Couldn't reach the server. Check your connection and try again."
         } catch {
