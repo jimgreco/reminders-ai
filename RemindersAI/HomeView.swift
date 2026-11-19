@@ -1,7 +1,7 @@
 import SwiftUI
 
 /// The lists screen, laid out like Reminders: search, smart lists, My Lists,
-/// and New Reminder / Add List along the bottom.
+/// a glass toolbar at the top right and a round add button at the bottom right.
 struct HomeView: View {
     @Environment(AppModel.self) private var model
     @Environment(Session.self) private var session
@@ -13,6 +13,7 @@ struct HomeView: View {
     @State private var editingList: ReminderList?
     @State private var deletingList: ReminderList?
     @State private var searchText = ""
+    @State private var searching = false
 
     var body: some View {
         @Bindable var model = model
@@ -27,26 +28,28 @@ struct HomeView: View {
             }
             .listStyle(.insetGrouped)
             .navigationTitle("Reminders")
-            .searchable(text: $searchText, prompt: "Search")
+            .modifier(ToolbarSearch(text: $searchText, isPresented: $searching))
             .toolbar {
+                #if targetEnvironment(macCatalyst)
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("Settings", systemImage: "gearshape") { showingSettings = true }
                 }
-                ToolbarItemGroup(placement: .addBar) {
-                    Button {
-                        showingNewReminder = true
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "plus.circle.fill")
-                            Text("New Reminder")
-                        }
-                        .fontWeight(.semibold)
-                        .foregroundStyle(.blue)
-                    }
-                    Spacer()
-                    Button("Add List") { showingNewList = true }.foregroundStyle(.blue)
+                ToolbarItemGroup(placement: .primaryAction) {
+                    Button("New Reminder", systemImage: "plus") { showingNewReminder = true }
+                    Button("Add List", systemImage: "text.badge.plus") { showingNewList = true }
                 }
+                #else
+                // One glass group at the top right, as in Reminders.
+                ToolbarItemGroup(placement: .topBarTrailing) {
+                    Button("Add List", systemImage: "text.badge.plus") { showingNewList = true }
+                    Menu("More", systemImage: "ellipsis") {
+                        Button("Settings", systemImage: "gearshape") { showingSettings = true }
+                    }
+                    Button("Search", systemImage: "magnifyingglass") { searching = true }
+                }
+                #endif
             }
+            .floatingAddButton("New Reminder", hidden: searching) { showingNewReminder = true }
             .refreshable { await model.refresh() }
             .navigationDestination(for: Route.self) { route in
                 switch route {
@@ -371,5 +374,55 @@ struct SettingsView: View {
                 ToolbarItem(placement: .confirmationAction) { Button("Done") { dismiss() } }
             }
         }
+    }
+}
+
+// MARK: Floating add button
+
+extension View {
+    /// The round blue + at the bottom right, as in Reminders on iOS 26. On the
+    /// Mac the window toolbar has the add buttons instead.
+    func floatingAddButton(_ label: String, tint: Color = .blue, hidden: Bool = false, action: @escaping () -> Void) -> some View {
+        #if targetEnvironment(macCatalyst)
+        self
+        #else
+        overlay(alignment: .bottomTrailing) {
+            if !hidden {
+            Button(action: action) {
+                Image(systemName: "plus")
+                    .font(.title2.weight(.semibold))
+                    .frame(width: 44, height: 44)
+            }
+            .buttonStyle(.glassProminent)
+            .buttonBorderShape(.circle)
+            .tint(tint)
+            .accessibilityLabel(label)
+            .padding(.trailing, 20)
+            .padding(.bottom, 8)
+            }
+        }
+        #endif
+    }
+}
+
+/// Search that opens from the toolbar's magnifying glass, as in Reminders,
+/// instead of a field that is always on screen. The Mac keeps its field.
+private struct ToolbarSearch: ViewModifier {
+    @Binding var text: String
+    @Binding var isPresented: Bool
+
+    func body(content: Content) -> some View {
+        #if targetEnvironment(macCatalyst)
+        content.searchable(text: $text, prompt: "Search")
+        #else
+        if isPresented {
+            content
+                .searchable(text: $text, isPresented: $isPresented,
+                            placement: .navigationBarDrawer(displayMode: .always), prompt: "Search")
+                .onChange(of: isPresented) { _, shown in if !shown { text = "" } }
+        } else {
+            content
+        }
+        #endif
     }
 }

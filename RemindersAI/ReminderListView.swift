@@ -104,22 +104,15 @@ struct ReminderListView: View {
                     }
                 }
             }
+            #if targetEnvironment(macCatalyst)
             if canAdd {
-                ToolbarItemGroup(placement: .addBar) {
-                    Button {
-                        addingFocused = true
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "plus.circle.fill")
-                            Text("New Reminder")
-                        }
-                        .fontWeight(.semibold)
-                        .foregroundStyle(tint)
-                    }
-                    Spacer()
+                ToolbarItem(placement: .primaryAction) {
+                    Button("New Reminder", systemImage: "plus") { addingFocused = true }
                 }
             }
+            #endif
         }
+        .floatingAddButton("New Reminder", tint: tint, hidden: !canAdd || addingFocused) { addingFocused = true }
         .refreshable { await model.refresh() }
         .sheet(item: $editingList) { ListEditor(list: $0) }
         .confirmationDialog("Delete \u{201C}\(title)\u{201D}?", isPresented: $confirmingDeleteList, titleVisibility: .visible) {
