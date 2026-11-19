@@ -96,6 +96,27 @@ struct ReminderDetailsCard: View {
         .onChange(of: listId) { _, _ in save() }
         .onChange(of: urlFocused) { _, focused in if !focused { save() } }
         .onDisappear(perform: save)
+        .confirmationDialog(
+            "Copy to \u{201C}\(refusal?.listTitle ?? "")\u{201D} instead?",
+            isPresented: Binding(get: { refusal != nil }, set: { if !$0 { reminders.dismissMoveRefusal() } }),
+            titleVisibility: .visible, presenting: refusal
+        ) { refusal in
+            Button("Copy and Delete Original") {
+                Task {
+                    if let copiedId = await reminders.copy(item, toList: refusal.listId), copiedId != item.externalId {
+                        onMoved(copiedId)
+                    }
+                }
+            }
+            Button("Cancel", role: .cancel) { reminders.dismissMoveRefusal() }
+        } message: { _ in
+            Text("iOS wouldn't move this reminder. A copy keeps the title, notes, dates, alerts, repeat, priority and link, but not subtasks, tags, the flag or images. To keep those, move it in Apple's Reminders app.")
+        }
+    }
+
+    /// The refused move for this reminder, if one is waiting for an answer.
+    private var refusal: MoveRefusal? {
+        reminders.moveRefusal.flatMap { $0.reminderId == item.id ? $0 : nil }
     }
 
     private func row(_ title: String, symbol: String, @ViewBuilder controls: () -> some View) -> some View {

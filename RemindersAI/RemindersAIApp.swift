@@ -7,6 +7,8 @@ enum Route: Hashable {
     case list(ReminderFilter)
     /// The reminder with this external identifier: its fields and its assistant conversation.
     case thread(String)
+    /// Plan my day: the reminders worth working on today.
+    case plan
 }
 
 /// The objects the whole app shares. The app delegate needs them too, for
@@ -19,6 +21,7 @@ final class AppModel {
     let session = Session()
     let reminders = RemindersStore()
     let assistant = AssistantStore()
+    let planner = PlannerStore()
     var path: [Route] = []
 
     func refresh() async {
@@ -91,6 +94,7 @@ struct RemindersAIApp: App {
                 .environment(model.session)
                 .environment(model.reminders)
                 .environment(model.assistant)
+                .environment(model.planner)
                 .onOpenURL { _ = GIDSignIn.sharedInstance.handle($0) }
                 .onChange(of: scenePhase, initial: true) { _, phase in
                     guard phase == .active, model.session.isSignedIn else { return }
@@ -146,6 +150,7 @@ struct RootView: View {
                 }
             } else {
                 assistant.reset()
+                model.planner.reset()
                 model.path = []
             }
         }

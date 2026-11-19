@@ -1,4 +1,5 @@
 import { test, describe, before, after } from "node:test";
+import { FakePlanClient, Planner } from "../src/planner.js";
 import assert from "node:assert/strict";
 import http from "node:http";
 import pg from "pg";
@@ -88,7 +89,9 @@ async function start(store, env = baseEnv()) {
   const pushes = [];
   const push = { notify: async (userId, message) => { pushes.push(message); } };
   const assistant = new Assistant({ store, client: agents, config, push, log: quiet });
-  const server = http.createServer(createApp({ store, config, assistant, verifyAppleToken: fakeApple, verifyGoogleToken: fakeApple }));
+  const planClient = new FakePlanClient();
+  const planner = new Planner({ client: planClient });
+  const server = http.createServer(createApp({ store, config, assistant, planner, verifyAppleToken: fakeApple, verifyGoogleToken: fakeApple }));
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
   const call = async (method, path, { body, token } = {}) => {
@@ -108,7 +111,7 @@ async function start(store, env = baseEnv()) {
     return r.body;
   };
   const raw = (path, token) => fetch(base + path, { headers: token ? { authorization: `Bearer ${token}` } : {} });
-  return { call, raw, signIn, agents, assistant, pushes, config, close: () => new Promise((r) => server.close(r)) };
+  return { call, raw, signIn, agents, assistant, pushes, config, planClient, close: () => new Promise((r) => server.close(r)) };
 }
 
 const REMINDER = { title: "Renew passport", notes: "expires in March", list: "Personal", due: "2026-12-01", priority: "high", timeZone: "America/New_York" };
@@ -327,6 +330,46 @@ function suite(name, makeStore) {
       await app.call("DELETE", threadPath(), { token });
       r = await app.call("POST", movedPath("/move"), { token, body: { to: RID } });
       assert.equal(r.status, 200);
+    });
+
+    test("plan my day picks from the reminders sent and stores nothing", async () => {
+      const reminders = [
+        { id: "R-1", title: "Renew passport", list: "Personal", due: "2026-12-01", priority: "high", notes: "x".repeat(5000), conversation: "idle" },
+        { id: "R-2", title: "Book dentist", list: "Health" },
+        { id: "R-2", title: "Duplicate id is dropped" },
+        { id: "R-3", title: "   " }
+      ];
+      const r = await app.call("POST", "/api/plan", { token, body: { reminders, timeZone: "America/New_York", now: "2026-11-18T09:00:00-05:00" } });
+      assert.equal(r.status, 200);
+      assert.deepEqual(r.body.suggestions.map((s) => s.reminderId), ["R-1", "R-2"]);
+      assert.equal(r.body.suggestions[0].assistantPrompt, "Work out the first step for me.");
+      const sent = app.planClient.requests.at(-1);
+      assert.equal(sent.output_config.format.type, "json_schema");
+      const prompt = sent.messages[0].content;
+      assert.match(prompt, /time zone America\/New_York/);
+      assert.match(prompt, /"conversation":"idle"/);
+      assert.ok(!prompt.includes("x".repeat(1001)), "notes are cut short");
+      assert.ok(!prompt.includes("Duplicate"));
+
+      assert.equal((await app.call("POST", "/api/plan", { body: { reminders } })).status, 401);
+      assert.equal((await app.call("POST", "/api/plan", { token, body: { reminders: "all" } })).status, 400);
+      const empty = await app.call("POST", "/api/plan", { token, body: { reminders: [] } });
+      assert.deepEqual(empty.body.suggestions, []);
+    });
+
+    test("a plan that names unknown reminders keeps only real ones", async () => {
+      const planner = new Planner({ client: { messages: { create: async () => ({
+        stop_reason: "end_turn",
+        content: [{ type: "text", text: JSON.stringify({ summary: "s", suggestions: [
+          { reminderId: "nope", reason: "", nextStep: "", assistantPrompt: "" },
+          { reminderId: "R-1", reason: "why", nextStep: "do", assistantPrompt: "" },
+          { reminderId: "R-1", reason: "again", nextStep: "do", assistantPrompt: "" }
+        ] }) }]
+      }) } } });
+      const plan = await planner.plan({ reminders: [{ id: "R-1", title: "t" }], timeZone: "", now: "" });
+      assert.deepEqual(plan.suggestions.map((s) => s.reason), ["why"]);
+      const refused = new Planner({ client: { messages: { create: async () => ({ stop_reason: "refusal", content: [] }) } } });
+      await assert.rejects(refused.plan({ reminders: [{ id: "R-1", title: "t" }] }), (e) => e.status === 502);
     });
 
     test("photos reach the agent as images, are listed without their data, and are served only to the owner", async () => {

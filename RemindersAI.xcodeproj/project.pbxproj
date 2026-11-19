@@ -7,6 +7,7 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		0A27130547D47DA7476019E5 /* PlanView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 678B9E6310DC843E92BC6D90 /* PlanView.swift */; };
 		0EBECEABADA609CAAB9E8786 /* Models.swift in Sources */ = {isa = PBXBuildFile; fileRef = 25DAD554053EE6D6334B8C16 /* Models.swift */; };
 		10D21FBED44E9F68171E1CE5 /* SignInView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8EA19AF72B5719D4A976D3B1 /* SignInView.swift */; };
 		1535E11AF1EA58776C93FC49 /* RemindersAITests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 26EBEC555A8E09D6D63ABDE9 /* RemindersAITests.swift */; };
@@ -46,6 +47,7 @@
 		4A6A8B1284B9425BC9D199E5 /* HomeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = HomeView.swift; sourceTree = "<group>"; };
 		5208B95237413D61D0F20768 /* RemindersAIApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RemindersAIApp.swift; sourceTree = "<group>"; };
 		638B31FD98B7626EAA9B4F65 /* RemindersAI.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = RemindersAI.entitlements; sourceTree = "<group>"; };
+		678B9E6310DC843E92BC6D90 /* PlanView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PlanView.swift; sourceTree = "<group>"; };
 		820554FD7465C90B93A94082 /* Session.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Session.swift; sourceTree = "<group>"; };
 		8EA19AF72B5719D4A976D3B1 /* SignInView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SignInView.swift; sourceTree = "<group>"; };
 		9241E15F9406A2D680B22148 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
@@ -99,6 +101,7 @@
 				0306760B0636B04419AC165F /* Keychain.swift */,
 				25DAD554053EE6D6334B8C16 /* Models.swift */,
 				A25E00A8FACF4CAD14217E7A /* Photos.swift */,
+				678B9E6310DC843E92BC6D90 /* PlanView.swift */,
 				9241E15F9406A2D680B22148 /* PrivacyInfo.xcprivacy */,
 				B8C9A5CACD1C85CF76DC530A /* ReminderDetailView.swift */,
 				CF2A4D96DB3092E3032E28B7 /* ReminderListView.swift */,
@@ -224,6 +227,7 @@
 				3B13DB82C51BEFF215E3AF0A /* Keychain.swift in Sources */,
 				0EBECEABADA609CAAB9E8786 /* Models.swift in Sources */,
 				8FAF5DA81AE68F9DF75665CF /* Photos.swift in Sources */,
+				0A27130547D47DA7476019E5 /* PlanView.swift in Sources */,
 				FB2843FEFD6BCE03BD37E888 /* ReminderDetailView.swift in Sources */,
 				209D862A03106791E5500E14 /* ReminderListView.swift in Sources */,
 				7E93EBB24DF4122C0C452178 /* RemindersAIApp.swift in Sources */,
