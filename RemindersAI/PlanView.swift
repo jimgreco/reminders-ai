@@ -30,14 +30,64 @@ struct DayPlan: Codable, Equatable {
     let summary: String
     let suggestions: [PlanSuggestion]
     var madeAt = Date()
+    /// Picks started with the assistant from this plan.
+    var started: Set<String> = []
+    /// Picks checked off from this plan. Kept here because a repeating
+    /// reminder never stays completed: Reminders moves it to its next date.
+    var finished: Set<String> = []
 
-    private enum CodingKeys: String, CodingKey { case summary, suggestions, madeAt }
+    private enum CodingKeys: String, CodingKey { case summary, suggestions, madeAt, started, finished }
 
     init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         summary = try c.decode(String.self, forKey: .summary)
         suggestions = try c.decode([PlanSuggestion].self, forKey: .suggestions)
         madeAt = try c.decodeIfPresent(Date.self, forKey: .madeAt) ?? Date()
+        started = try c.decodeIfPresent(Set<String>.self, forKey: .started) ?? []
+        finished = try c.decodeIfPresent(Set<String>.self, forKey: .finished) ?? []
+    }
+}
+
+/// A reminder left out of Plan My Day, until a time or for good (`until` nil).
+struct PlanDismissal: Codable, Equatable {
+    let reminderId: String
+    let until: Date?
+}
+
+private struct PlanDismissals: Decodable { let dismissals: [PlanDismissal] }
+private struct DismissBody: Encodable { let until: String? }
+
+/// How long to leave a reminder out of the suggestions.
+enum DismissLength: CaseIterable, Identifiable {
+    case today, week, month, forever
+    var id: Self { self }
+
+    var label: String {
+        switch self {
+        case .today: "For Today"
+        case .week: "For a Week"
+        case .month: "For a Month"
+        case .forever: "Don't Suggest Again"
+        }
+    }
+
+    var symbol: String {
+        switch self {
+        case .today: "moon"
+        case .week: "calendar"
+        case .month: "calendar.badge.clock"
+        case .forever: "nosign"
+        }
+    }
+
+    /// When the reminder comes back; nil means never.
+    func until(from now: Date = Date(), calendar: Calendar = .current) -> Date? {
+        switch self {
+        case .today: calendar.date(byAdding: .day, value: 1, to: calendar.startOfDay(for: now))
+        case .week: calendar.date(byAdding: .day, value: 7, to: now)
+        case .month: calendar.date(byAdding: .month, value: 1, to: now)
+        case .forever: nil
+        }
     }
 }
 
@@ -50,7 +100,10 @@ final class PlannerStore {
     private(set) var isPlanning = false
     var lastError: String?
     /// Suggestions started with the assistant from this plan.
-    private(set) var started: Set<String> = []
+    var started: Set<String> { plan?.started ?? [] }
+    /// Reminders left out of the suggestions, by reminder id. Kept on the
+    /// server so they apply on every device, and the planner never sees them.
+    private(set) var dismissals: [String: PlanDismissal] = [:]
 
     private static let key = "dayPlan"
     /// The saved plan's own format. The API coders don't round-trip dates:
@@ -78,6 +131,7 @@ final class PlannerStore {
         guard !isPlanning else { return }
         isPlanning = true
         defer { isPlanning = false }
+        await loadDismissals(session: session)
         let open = reminders.items(for: .all, includeCompleted: false).prefix(Self.maxReminders)
         let request = PlanRequest(
             reminders: open.map { item in
@@ -93,9 +147,8 @@ final class PlannerStore {
         do {
             let made: DayPlan = try await session.request("POST", "/api/plan", body: request, timeout: 120)
             plan = made
-            started = []
             lastError = nil
-            if let data = try? Self.storeEncoder.encode(made) { UserDefaults.standard.set(data, forKey: Self.key) }
+            save()
         } catch APIError.offline {
             lastError = "Couldn't reach the server. Check your connection and try again."
         } catch {
@@ -103,11 +156,88 @@ final class PlannerStore {
         }
     }
 
-    func markStarted(_ reminderId: String) { started.insert(reminderId) }
+    /// Today's picks that are still to do: not checked off here, and not
+    /// completed (or deleted) in Reminders.
+    func open(in reminders: RemindersStore) -> [PlanSuggestion] {
+        guard let plan = todaysPlan else { return [] }
+        return plan.suggestions.filter { suggestion in
+            !plan.finished.contains(suggestion.reminderId)
+                && !isDismissed(suggestion.reminderId)
+                && (reminders.item(externalId: suggestion.reminderId).map { !$0.isCompleted } ?? false)
+        }
+    }
+
+    func isDismissed(_ reminderId: String, now: Date = Date()) -> Bool {
+        guard let dismissal = dismissals[reminderId] else { return false }
+        return dismissal.until.map { $0 > now } ?? true
+    }
+
+    /// Dismissals still in force, soonest to come back first, the permanent ones last.
+    var activeDismissals: [PlanDismissal] {
+        dismissals.values.filter { isDismissed($0.reminderId) }.sorted {
+            ($0.until ?? .distantFuture) < ($1.until ?? .distantFuture)
+        }
+    }
+
+    func loadDismissals(session: Session) async {
+        do {
+            let loaded: PlanDismissals = try await session.request("GET", "/api/plan/dismissals")
+            dismissals = Dictionary(loaded.dismissals.map { ($0.reminderId, $0) }, uniquingKeysWith: { _, last in last })
+        } catch {
+            // Keep what we had; the plan still works, and the server filters too.
+        }
+    }
+
+    /// Hides the reminder from today's plan now, and from new plans until then.
+    func dismiss(_ reminderId: String, for length: DismissLength, session: Session) async {
+        let previous = dismissals[reminderId]
+        let dismissal = PlanDismissal(reminderId: reminderId, until: length.until())
+        dismissals[reminderId] = dismissal
+        do {
+            let _: PlanDismissal = try await session.request(
+                "PUT", Self.dismissalPath(reminderId), body: DismissBody(until: dismissal.until.map(JSONCoding.timestamp))
+            )
+            lastError = nil
+        } catch {
+            dismissals[reminderId] = previous
+            lastError = "Couldn't dismiss it: \(error.localizedDescription)"
+        }
+    }
+
+    /// Lets the reminder be suggested again.
+    func restore(_ reminderId: String, session: Session) async {
+        let previous = dismissals.removeValue(forKey: reminderId)
+        do {
+            let _: EmptyResponse = try await session.request("DELETE", Self.dismissalPath(reminderId))
+            lastError = nil
+        } catch {
+            dismissals[reminderId] = previous
+            lastError = "Couldn't bring it back: \(error.localizedDescription)"
+        }
+    }
+
+    private static func dismissalPath(_ reminderId: String) -> String {
+        "/api/plan/dismissals/" + (reminderId.addingPercentEncoding(withAllowedCharacters: .alphanumerics) ?? reminderId)
+    }
+
+    func markStarted(_ reminderId: String) {
+        plan?.started.insert(reminderId)
+        save()
+    }
+
+    func markFinished(_ reminderId: String) {
+        plan?.finished.insert(reminderId)
+        save()
+    }
+
+    private func save() {
+        guard let plan, let data = try? Self.storeEncoder.encode(plan) else { return }
+        UserDefaults.standard.set(data, forKey: Self.key)
+    }
 
     func reset() {
         plan = nil
-        started = []
+        dismissals = [:]
         UserDefaults.standard.removeObject(forKey: Self.key)
     }
 }
@@ -118,6 +248,7 @@ final class PlannerStore {
 struct PlanCard: View {
     @Environment(AppModel.self) private var model
     @Environment(PlannerStore.self) private var planner
+    @Environment(RemindersStore.self) private var reminders
 
     var body: some View {
         Button {
@@ -136,7 +267,8 @@ struct PlanCard: View {
                 Spacer(minLength: 8)
                 if planner.isPlanning {
                     ProgressView()
-                } else if let count = planner.todaysPlan?.suggestions.count {
+                } else if planner.todaysPlan != nil {
+                    let count = planner.open(in: reminders).count
                     Text("\(count)").font(.title2.bold()).fontDesign(.rounded)
                 }
             }
@@ -173,7 +305,7 @@ struct PlanView: View {
                         Text("Made \(plan.madeAt.formatted(date: .omitted, time: .shortened)) from your open reminders.")
                     }
                 }
-                let shown = plan.suggestions.filter { reminders.item(externalId: $0.reminderId).map { !$0.isCompleted } ?? false }
+                let shown = planner.open(in: reminders)
                 if shown.isEmpty {
                     ContentUnavailableView("All Done", systemImage: "checkmark.circle",
                                            description: Text("Everything picked for today is finished or gone. Plan again for more."))
@@ -215,6 +347,7 @@ struct PlanView: View {
             if let error = planner.lastError {
                 Section { Text(error).font(.footnote).foregroundStyle(.red) }
             }
+            DismissedSection()
         }
         .listStyle(.insetGrouped)
         .navigationTitle("Today's Plan")
@@ -227,6 +360,7 @@ struct PlanView: View {
             }
         }
         .refreshable { if planner.todaysPlan != nil { await make() } }
+        .task { await planner.loadDismissals(session: session) }
     }
 
     private func plan() {
@@ -253,11 +387,14 @@ private struct SuggestionRow: View {
     @Environment(AppModel.self) private var model
     @Environment(RemindersStore.self) private var reminders
     @Environment(AssistantStore.self) private var assistant
+    @Environment(PlannerStore.self) private var planner
+    @Environment(Session.self) private var session
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {
             // Completes the reminder, like the circle on every reminder row.
             Button {
+                planner.markFinished(item.externalId)
                 Task { await reminders.setCompleted(item, true) }
             } label: {
                 Image(systemName: "circle").font(.title3).foregroundStyle(.secondary)
@@ -288,12 +425,39 @@ private struct SuggestionRow: View {
                 if !suggestion.nextStep.isEmpty {
                     Text(suggestion.nextStep).font(.subheadline)
                 }
-                if !suggestion.assistantPrompt.isEmpty {
-                    assistantButton
+                HStack(spacing: 8) {
+                    if !suggestion.assistantPrompt.isEmpty {
+                        assistantButton
+                    }
+                    dismissMenu
                 }
             }
         }
         .padding(.vertical, 4)
+    }
+
+    /// Leaves this reminder out of the plan for a while, or for good.
+    private var dismissMenu: some View {
+        Menu {
+            ForEach(DismissLength.allCases) { length in
+                Button(length.label, systemImage: length.symbol) {
+                    Task { await planner.dismiss(item.externalId, for: length, session: session) }
+                }
+            }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: "xmark")
+                Text("Dismiss")
+            }
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .lineLimit(1)
+            .padding(.horizontal, 4)
+            .padding(.vertical, 2)
+        }
+        .menuStyle(.button)
+        .buttonStyle(.glass)
+        .buttonBorderShape(.capsule)
     }
 
     /// A small capsule that hands the suggested prompt to the assistant; the prompt shows on long press.
@@ -329,5 +493,52 @@ private struct SuggestionRow: View {
         if let due = item.dueDate { parts.append(DueText.short(due, hasTime: item.hasDueTime)) }
         if item.priority != .none { parts.append("\(item.priority.label) priority") }
         return parts.filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+}
+
+// MARK: Dismissed reminders
+
+/// The reminders left out of the suggestions, with a way to bring each back.
+private struct DismissedSection: View {
+    @Environment(RemindersStore.self) private var reminders
+    @Environment(PlannerStore.self) private var planner
+    @Environment(Session.self) private var session
+    @State private var expanded = false
+
+    var body: some View {
+        let shown = planner.activeDismissals.compactMap { dismissal in
+            reminders.item(externalId: dismissal.reminderId).map { (dismissal, $0) }
+        }
+        if !shown.isEmpty {
+            Section {
+                DisclosureGroup(isExpanded: $expanded) {
+                    ForEach(shown, id: \.0.reminderId) { dismissal, item in
+                        HStack {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(item.title.isEmpty ? "Untitled" : item.title)
+                                Text(Self.untilText(dismissal.until)).font(.caption).foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 8)
+                            Button("Restore") {
+                                Task { await planner.restore(dismissal.reminderId, session: session) }
+                            }
+                            .buttonStyle(.glass)
+                            .buttonBorderShape(.capsule)
+                            .font(.subheadline.weight(.medium))
+                        }
+                    }
+                } label: {
+                    Text("Not Suggesting (\(shown.count))").foregroundStyle(.secondary)
+                }
+            }
+        }
+    }
+
+    static func untilText(_ until: Date?) -> String {
+        guard let until else { return "Never suggested again" }
+        if Calendar.current.isDateInTomorrow(until) && Calendar.current.startOfDay(for: until) == until {
+            return "Back tomorrow"
+        }
+        return "Back \(until.formatted(date: .abbreviated, time: .omitted))"
     }
 }

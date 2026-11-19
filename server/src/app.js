@@ -370,19 +370,56 @@ export function createApp({ store, config, assistant, planner = null, verifyAppl
       });
     }
 
-    // Plan my day: the open reminders in, a few picks for today out. Nothing is stored.
+    // Plan my day: the open reminders in, a few picks for today out. The plan
+    // isn't stored; reminders the person dismissed are left out before Claude sees them.
     if (method === "POST" && path === "/api/plan") {
       if (!planner?.configured) return send(response, 503, { error: "Planning isn't set up on the server yet." });
       const retry = limited(request, `plan:${user.id}`, 30, 60 * 60_000);
       if (retry) return send(response, 429, { error: "Too many plans this hour; try again later." }, { "retry-after": String(retry) });
       let plan;
       try {
-        plan = await planner.plan(validatePlanRequest(await readJSON(request, MAX_PLAN_BYTES)));
+        const planRequest = validatePlanRequest(await readJSON(request, MAX_PLAN_BYTES));
+        // A plan still works if dismissals can't be read (say, before the migration that adds them).
+        const dismissals = await store.listDismissals(user.id, now()).catch((error) => {
+          console.error(`plan: dismissals unavailable: ${error.message}`);
+          return [];
+        });
+        const dismissed = new Set(dismissals.map((d) => d.reminderId));
+        planRequest.reminders = planRequest.reminders.filter((r) => !dismissed.has(r.id));
+        plan = await planner.plan(planRequest);
       } catch (error) {
         if (error instanceof PlanError) throw new HttpError(error.status, error.message);
         throw error;
       }
       return send(response, 200, plan);
+    }
+
+    // Reminders left out of Plan My Day, for a while or for good.
+    if (method === "GET" && path === "/api/plan/dismissals") {
+      return send(response, 200, { dismissals: await store.listDismissals(user.id, now()) });
+    }
+    const dismissalMatch = path.match(/^\/api\/plan\/dismissals\/([^/]+)$/);
+    if (dismissalMatch && (method === "PUT" || method === "DELETE")) {
+      let reminderId;
+      try {
+        reminderId = decodeURIComponent(dismissalMatch[1]);
+      } catch {
+        throw new HttpError(400, "bad reminder id");
+      }
+      if (!reminderId || reminderId.length > 255) throw new HttpError(400, "bad reminder id");
+      if (method === "DELETE") {
+        await store.deleteDismissal(user.id, reminderId);
+        return send(response, 200, { ok: true });
+      }
+      const body = await readJSON(request);
+      let until = null;
+      if (body.until !== null && body.until !== undefined) {
+        const date = typeof body.until === "string" ? new Date(body.until) : new Date(NaN);
+        if (Number.isNaN(date.getTime())) throw new HttpError(400, "until must be a date or null");
+        if (date <= now()) throw new HttpError(400, "until must be in the future");
+        until = date.toISOString();
+      }
+      return send(response, 200, await store.setDismissal(user.id, reminderId, until));
     }
 
     const ackMatch = path.match(/^\/api\/ops\/([^/]+)\/ack$/);
