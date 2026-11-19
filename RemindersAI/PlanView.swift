@@ -251,59 +251,71 @@ private struct SuggestionRow: View {
     @Environment(AssistantStore.self) private var assistant
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 10) {
+        HStack(alignment: .top, spacing: 12) {
+            // Completes the reminder, like the circle on every reminder row.
             Button {
-                model.path.append(.thread(item.externalId))
+                Task { await reminders.setCompleted(item, true) }
             } label: {
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(alignment: .firstTextBaseline) {
-                        Text(item.title.isEmpty ? "Untitled" : item.title).font(.headline).multilineTextAlignment(.leading)
-                        Spacer(minLength: 8)
-                        if let thread = assistant.summary(for: item.externalId) { ThreadBadge(thread: thread) }
-                    }
-                    Text(meta).font(.subheadline).foregroundStyle(item.isOverdue() ? .red : .secondary)
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .contentShape(Rectangle())
+                Image(systemName: "circle").font(.title3).foregroundStyle(.secondary)
             }
             .buttonStyle(.plain)
+            .accessibilityLabel("Mark as completed")
 
-            if !suggestion.reason.isEmpty {
-                Text(suggestion.reason).font(.subheadline).foregroundStyle(.secondary)
-            }
-            if !suggestion.nextStep.isEmpty {
-                Label {
-                    Text(suggestion.nextStep).font(.subheadline)
-                } icon: {
-                    Image(systemName: "arrow.forward.circle.fill").foregroundStyle(reminders.color(for: item))
-                }
-            }
-            HStack(spacing: 10) {
-                if !suggestion.assistantPrompt.isEmpty {
-                    Button {
-                        onStart()
-                    } label: {
-                        Label(started ? "Assistant Started" : "Have the Assistant Start", systemImage: "sparkles")
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .tint(.purple)
-                    .disabled(started)
-                }
+            VStack(alignment: .leading, spacing: 8) {
                 Button {
-                    Task { await reminders.setCompleted(item, true) }
+                    model.path.append(.thread(item.externalId))
                 } label: {
-                    Label("Done", systemImage: "checkmark")
+                    VStack(alignment: .leading, spacing: 2) {
+                        HStack(alignment: .firstTextBaseline) {
+                            Text(item.title.isEmpty ? "Untitled" : item.title).font(.headline).multilineTextAlignment(.leading)
+                            Spacer(minLength: 8)
+                            if let thread = assistant.summary(for: item.externalId) { ThreadBadge(thread: thread) }
+                        }
+                        Text(meta).font(.subheadline).foregroundStyle(item.isOverdue() ? .red : .secondary)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
-                .buttonStyle(.bordered)
-            }
-            .font(.subheadline)
-            if !suggestion.assistantPrompt.isEmpty && !started {
-                Text("Asks: \u{201C}\(suggestion.assistantPrompt)\u{201D}")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                .buttonStyle(.plain)
+
+                if !suggestion.reason.isEmpty {
+                    Text(suggestion.reason).font(.subheadline).foregroundStyle(.secondary)
+                }
+                if !suggestion.nextStep.isEmpty {
+                    Text(suggestion.nextStep).font(.subheadline)
+                }
+                if !suggestion.assistantPrompt.isEmpty {
+                    assistantButton
+                }
             }
         }
         .padding(.vertical, 4)
+    }
+
+    /// A small capsule that hands the suggested prompt to the assistant; the prompt shows on long press.
+    @ViewBuilder
+    private var assistantButton: some View {
+        if started {
+            Label("Assistant is on it", systemImage: "sparkles")
+                .font(.subheadline)
+                .foregroundStyle(.purple)
+        } else {
+            Button(action: onStart) {
+                HStack(spacing: 5) {
+                    Image(systemName: "sparkles").symbolRenderingMode(.monochrome)
+                    Text("Ask Assistant")
+                }
+                .font(.subheadline.weight(.medium))
+                .lineLimit(1)
+            }
+            .buttonStyle(.bordered)
+            .buttonBorderShape(.capsule)
+            .controlSize(.small)
+            .tint(.purple)
+            .contextMenu {
+                Text("Asks: \u{201C}\(suggestion.assistantPrompt)\u{201D}")
+            }
+        }
     }
 
     private var meta: String {
