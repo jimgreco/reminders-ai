@@ -458,11 +458,20 @@ function suite(name, makeStore) {
       assert.deepEqual((await app.call("GET", "/api/sync", { token })).body, { threads: [], ops: [] });
     });
 
-    test("refresh tokens rotate", async () => {
+    test("refresh tokens rotate, and a lost reply doesn't sign you out", async () => {
       const session = await app.signIn();
-      const next = await app.call("POST", "/auth/refresh", { body: { refreshToken: session.refreshToken } });
+      const refresh = (refreshToken) => app.call("POST", "/auth/refresh", { body: { refreshToken } });
+      const next = await refresh(session.refreshToken);
       assert.equal(next.status, 200);
-      assert.equal((await app.call("POST", "/auth/refresh", { body: { refreshToken: session.refreshToken } })).status, 401);
+      assert.notEqual(next.body.refreshToken, session.refreshToken);
+      // The phone never saw `next` and retries with the old token.
+      const retry = await refresh(session.refreshToken);
+      assert.equal(retry.status, 200);
+      assert.equal((await refresh(retry.body.refreshToken)).status, 200);
+      // Signing out ends a token for good.
+      assert.equal((await app.call("POST", "/auth/signout", { body: { refreshToken: session.refreshToken } })).status, 200);
+      assert.equal((await refresh(session.refreshToken)).status, 401);
+      assert.equal((await refresh("not-a-token")).status, 401);
     });
   });
 }

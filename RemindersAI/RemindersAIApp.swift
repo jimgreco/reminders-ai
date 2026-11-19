@@ -97,7 +97,9 @@ struct RemindersAIApp: App {
                 .environment(model.planner)
                 .onOpenURL { _ = GIDSignIn.sharedInstance.handle($0) }
                 .onChange(of: scenePhase, initial: true) { _, phase in
-                    guard phase == .active, model.session.isSignedIn else { return }
+                    guard phase == .active else { return }
+                    model.session.resume()
+                    guard model.session.isSignedIn else { return }
                     Task { await model.refresh() }
                 }
         }
