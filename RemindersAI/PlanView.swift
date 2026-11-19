@@ -200,7 +200,7 @@ struct PlanView: View {
                         } label: {
                             Label("Plan My Day", systemImage: "sparkles").frame(maxWidth: .infinity)
                         }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(.glassProminent)
                         .controlSize(.large)
                     }
                     .padding(.vertical, 4)
@@ -305,13 +305,15 @@ private struct SuggestionRow: View {
                     Image(systemName: "sparkles").symbolRenderingMode(.monochrome)
                     Text("Ask Assistant")
                 }
-                .font(.subheadline.weight(.medium))
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.purple)
                 .lineLimit(1)
+                .padding(.horizontal, 4)
+                .padding(.vertical, 2)
             }
-            .buttonStyle(.bordered)
+            // The Liquid Glass of the toolbar and the floating add button.
+            .buttonStyle(.glass)
             .buttonBorderShape(.capsule)
-            .controlSize(.small)
-            .tint(.purple)
             .contextMenu {
                 Text("Asks: \u{201C}\(suggestion.assistantPrompt)\u{201D}")
             }
