@@ -135,13 +135,22 @@ enum ListColor: String, CaseIterable, Identifiable {
 
 enum RemindersAccess { case unknown, granted, denied }
 
+struct MoveRefusal: Equatable {
+    /// EventKit's local identifier of the reminder that didn't move.
+    let reminderId: String
+    let listId: String
+    let listTitle: String
+}
+
 enum ReminderEditError: LocalizedError {
     case missing
     case readOnly
     case invalid(String)
+    case moveRefused
 
     var errorDescription: String? {
         switch self {
+        case .moveRefused: "iOS wouldn't move this reminder to that list."
         case .missing: "The reminder no longer exists on this iPhone."
         case .readOnly: "This list can't be changed."
         case .invalid(let why): why
@@ -160,6 +169,8 @@ final class RemindersStore {
     private(set) var items: [ReminderItem] = []
     private(set) var defaultListId: String?
     var lastError: String?
+    /// A list change iOS refused, waiting for the person to choose whether to copy instead.
+    private(set) var moveRefusal: MoveRefusal?
 
     @ObservationIgnored private let eventStore = EKEventStore()
     @ObservationIgnored private var observer: NSObjectProtocol?
@@ -286,6 +297,9 @@ final class RemindersStore {
         do {
             try work()
             lastError = nil
+        } catch ReminderEditError.moveRefused {
+            // Not an error to show: the reminder's page asks what to do.
+            lastError = nil
         } catch {
             lastError = error.localizedDescription
         }
@@ -378,34 +392,48 @@ final class RemindersStore {
         return savedId
     }
 
-    /// Moves a reminder to another list. EventKit sometimes refuses the move, or
-    /// saves without moving it; then the reminder is copied into the list and the
-    /// original removed, as Reminders itself does between accounts.
+    /// Moves a reminder to another list. When iOS refuses (it sometimes does,
+    /// with reminderkit error -3002), the other edits are still saved and
+    /// `moveRefusal` asks the person whether to copy the reminder instead.
     private func move(_ reminder: EKReminder, to calendar: EKCalendar) throws -> String {
-        let copy = EKReminder(eventStore: eventStore)
-        copy.title = reminder.title
-        copy.notes = reminder.notes
-        copy.url = reminder.url
-        copy.priority = reminder.priority
-        copy.startDateComponents = reminder.startDateComponents
-        copy.dueDateComponents = reminder.dueDateComponents
-        for alarm in reminder.alarms ?? [] { copy.addAlarm(alarm.copy() as! EKAlarm) }
-        for rule in reminder.recurrenceRules ?? [] { copy.addRecurrenceRule(rule.copy() as! EKRecurrenceRule) }
-        copy.isCompleted = reminder.isCompleted
-        let originalId = reminder.calendarItemIdentifier
         let originalCalendar = reminder.calendar
-
         reminder.calendar = calendar
         if (try? eventStore.save(reminder, commit: true)) != nil,
            let saved = eventStore.calendarItem(withIdentifier: reminder.calendarItemIdentifier) as? EKReminder,
            saved.calendar?.calendarIdentifier == calendar.calendarIdentifier {
             return saved.calendarItemExternalIdentifier ?? saved.calendarItemIdentifier
         }
-
         reminder.calendar = originalCalendar
-        copy.calendar = calendar
-        try eventStore.save(copy, commit: true)
-        if let original = self.reminder(id: originalId), original.calendarItemIdentifier != copy.calendarItemIdentifier {
+        try? save(reminder)
+        moveRefusal = MoveRefusal(reminderId: reminder.calendarItemIdentifier, listId: calendar.calendarIdentifier,
+                                  listTitle: calendar.title)
+        throw ReminderEditError.moveRefused
+    }
+
+    /// The other way to change lists: a copy in the new list, then the original
+    /// removed. EventKit can't see subtasks, tags, flags or images, so those
+    /// are lost; only do this when the person agrees. Returns the copy's external id.
+    func copy(_ item: ReminderItem, toList listId: String) async -> String? {
+        moveRefusal = nil
+        var copiedId: String?
+        await perform {
+            guard let original = reminder(id: item.id) else { throw ReminderEditError.missing }
+            guard let calendar = eventStore.calendar(withIdentifier: listId), calendar.allowsContentModifications else {
+                throw ReminderEditError.readOnly
+            }
+            let copy = EKReminder(eventStore: eventStore)
+            copy.title = original.title
+            copy.notes = original.notes
+            copy.url = original.url
+            copy.priority = original.priority
+            copy.startDateComponents = original.startDateComponents
+            copy.dueDateComponents = original.dueDateComponents
+            for alarm in original.alarms ?? [] { copy.addAlarm(alarm.copy() as! EKAlarm) }
+            for rule in original.recurrenceRules ?? [] { copy.addRecurrenceRule(rule.copy() as! EKRecurrenceRule) }
+            copy.isCompleted = original.isCompleted
+            copy.calendar = calendar
+            try eventStore.save(copy, commit: true)
+            copiedId = copy.calendarItemExternalIdentifier ?? copy.calendarItemIdentifier
             do {
                 try eventStore.remove(original, commit: true)
             } catch {
@@ -413,8 +441,10 @@ final class RemindersStore {
                 throw ReminderEditError.invalid("Copied to \(calendar.title), but the original couldn't be removed.")
             }
         }
-        return copy.calendarItemExternalIdentifier ?? copy.calendarItemIdentifier
+        return copiedId
     }
+
+    func dismissMoveRefusal() { moveRefusal = nil }
 
     // MARK: Lists
 

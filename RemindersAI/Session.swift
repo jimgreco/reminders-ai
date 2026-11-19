@@ -109,12 +109,13 @@ final class Session {
     // MARK: Authenticated requests
 
     /// Sends an authenticated request, refreshing the access token once on 401.
-    func request<T: Decodable>(_ method: String, _ path: String, body: (some Encodable)? = nil as String?) async throws -> T {
+    func request<T: Decodable>(_ method: String, _ path: String, body: (some Encodable)? = nil as String?,
+                               timeout: TimeInterval = 45) async throws -> T {
         do {
-            return try await raw(method, path, body: body, token: Keychain.read("accessToken"))
+            return try await raw(method, path, body: body, token: Keychain.read("accessToken"), timeout: timeout)
         } catch APIError.signedOut {
             try await refresh()
-            return try await raw(method, path, body: body, token: Keychain.read("accessToken"))
+            return try await raw(method, path, body: body, token: Keychain.read("accessToken"), timeout: timeout)
         }
     }
 
@@ -166,9 +167,10 @@ final class Session {
         }
     }
 
-    private func raw<T: Decodable>(_ method: String, _ path: String, body: (some Encodable)?, token: String?) async throws -> T {
+    private func raw<T: Decodable>(_ method: String, _ path: String, body: (some Encodable)?, token: String?,
+                                   timeout: TimeInterval = 45) async throws -> T {
         guard let url = URL(string: path, relativeTo: baseURL) else { throw APIError.server(0, "Bad URL") }
-        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 45)
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: timeout)
         request.httpMethod = method
         if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
         if let body {

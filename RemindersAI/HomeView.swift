@@ -52,6 +52,7 @@ struct HomeView: View {
                 switch route {
                 case .list(let filter): ReminderListView(filter: filter)
                 case .thread(let externalId): ThreadView(reminderId: externalId)
+                case .plan: PlanView()
                 }
             }
             .sheet(isPresented: $showingSettings) { SettingsView() }
@@ -72,7 +73,13 @@ struct HomeView: View {
         }
     }
 
+    @ViewBuilder
     private var smartLists: some View {
+        Section {
+            PlanCard()
+                .listRowInsets(EdgeInsets())
+                .listRowBackground(Color.clear)
+        }
         Section {
             LazyVGrid(columns: [GridItem(.flexible(), spacing: 12), GridItem(.flexible())], spacing: 12) {
                 SmartCard(title: "Today", symbol: "calendar", color: .blue,

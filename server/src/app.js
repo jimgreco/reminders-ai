@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { PlanError, validatePlanRequest } from "./planner.js";
 import appleSignin from "apple-signin-auth";
 import { OAuth2Client } from "google-auth-library";
 
@@ -11,6 +12,7 @@ export const LIMITS = {
   images: 4, imageBytes: 3 * 1024 * 1024
 };
 // A message with photos: four images as base64, plus the text and reminder.
+const MAX_PLAN_BYTES = 2 * 1024 * 1024;
 const MAX_MESSAGE_BYTES = Math.ceil(LIMITS.images * LIMITS.imageBytes * 4 / 3) + MAX_BODY_BYTES;
 const IMAGE_TYPES = { "image/jpeg": [0xff, 0xd8, 0xff], "image/png": [0x89, 0x50, 0x4e, 0x47], "image/gif": [0x47, 0x49, 0x46], "image/webp": [0x52, 0x49, 0x46, 0x46] };
 
@@ -165,7 +167,7 @@ function publicMessage(m) {
   };
 }
 
-export function createApp({ store, config, assistant, verifyAppleToken, verifyGoogleToken, now = () => new Date() }) {
+export function createApp({ store, config, assistant, planner = null, verifyAppleToken, verifyGoogleToken, now = () => new Date() }) {
   const buckets = new Map();
 
   verifyAppleToken ??= async (identityToken) =>
@@ -366,6 +368,21 @@ export function createApp({ store, config, assistant, verifyAppleToken, verifyGo
         threads: threads.map(threadSummary),
         ops: ops.map((o) => ({ id: o.id, reminderId: o.reminderId, kind: o.kind, payload: o.payload, createdAt: o.createdAt }))
       });
+    }
+
+    // Plan my day: the open reminders in, a few picks for today out. Nothing is stored.
+    if (method === "POST" && path === "/api/plan") {
+      if (!planner?.configured) return send(response, 503, { error: "Planning isn't set up on the server yet." });
+      const retry = limited(request, `plan:${user.id}`, 30, 60 * 60_000);
+      if (retry) return send(response, 429, { error: "Too many plans this hour; try again later." }, { "retry-after": String(retry) });
+      let plan;
+      try {
+        plan = await planner.plan(validatePlanRequest(await readJSON(request, MAX_PLAN_BYTES)));
+      } catch (error) {
+        if (error instanceof PlanError) throw new HttpError(error.status, error.message);
+        throw error;
+      }
+      return send(response, 200, plan);
     }
 
     const ackMatch = path.match(/^\/api\/ops\/([^/]+)\/ack$/);

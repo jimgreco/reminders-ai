@@ -3,6 +3,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { createApp, loadConfig } from "./app.js";
 import { Assistant } from "./agent.js";
 import { FakeAgentClient } from "./fake-agent.js";
+import { FakePlanClient, Planner } from "./planner.js";
 import { Pusher, loadPushConfig } from "./push.js";
 import { MemoryStore, PostgresStore } from "./store.js";
 
@@ -25,9 +26,15 @@ if (!client && !config.production && process.env.REMINDERS_AI_FAKE_AGENT === "1"
 if (!client) console.warn("AGENT_ID, AGENT_ENVIRONMENT_ID or ANTHROPIC_API_KEY is not set: the assistant is off");
 
 const assistant = new Assistant({ store, client, config, push });
+
+// Plan my day needs only the API key, not the agent.
+let planClient = null;
+if (process.env.ANTHROPIC_API_KEY) planClient = client instanceof Anthropic ? client : new Anthropic();
+else if (!config.production && process.env.REMINDERS_AI_FAKE_AGENT === "1") planClient = new FakePlanClient();
+const planner = new Planner({ client: planClient });
 assistant.start();
 
-const server = http.createServer(createApp({ store, config, assistant }));
+const server = http.createServer(createApp({ store, config, assistant, planner }));
 server.requestTimeout = 60_000;
 server.headersTimeout = 15_000;
 server.listen(config.port, () => console.log(`reminders-ai listening on :${config.port} (build ${config.build})`));

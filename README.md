@@ -37,19 +37,28 @@ up whenever you return.
 EventKit has no API for subtasks, so follow-up steps are separate reminders in
 the same list.
 
+## Plan My Day
+
+The card at the top of the home screen sends your open reminders (title, list,
+due date, priority, the first 1,000 characters of the notes, and the state of
+any assistant conversation) to `POST /api/plan`. One Claude call
+(`server/src/planner.js`) picks up to six to make progress on today, each with
+why, a first step, and, where the assistant can help, the message that starts
+it. The server stores none of it; the plan is kept on the device for the day.
+
 ## What is stored where
 
 | Where | What |
 |---|---|
 | Apple Reminders | every task: title, notes, dates, completion. Nothing is cached elsewhere. |
-| Server database | each thread's messages, the edits waiting for the iPhone, push tokens, sign-in sessions. A reminder's details reach the server only when you message the assistant about it. |
+| Server database | each thread's messages, the edits waiting for the iPhone, push tokens, sign-in sessions. A reminder's details reach the server only when you message the assistant about it or plan your day (a plan is not stored). |
 | Anthropic | each session's conversation, until the session is deleted. |
 | iPhone Keychain | session tokens, this device only. |
 
 ## Layout
 
 - `server/` Node 22 API: `src/app.js` routes, `src/agent.js` the agent
-  definition and session loop, `src/store.js` memory and Postgres stores,
+  definition and session loop, `src/planner.js` Plan My Day, `src/store.js` memory and Postgres stores,
   `src/push.js` APNs, `scripts/setup-agent.js` one-time agent setup, `db/`
   migrations, `test/`.
 - `RemindersAI/` iPhone app; `RemindersAITests/` unit tests. `project.yml` is
