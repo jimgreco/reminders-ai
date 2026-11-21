@@ -16,6 +16,8 @@ struct PlanRequest: Encodable {
     let reminders: [PlanReminder]
     let timeZone: String
     let now: String
+    /// The town the phone is in, when location is allowed.
+    let location: String?
 }
 
 struct PlanSuggestion: Codable, Identifiable, Equatable {
@@ -131,6 +133,7 @@ final class PlannerStore {
         guard !isPlanning else { return }
         isPlanning = true
         defer { isPlanning = false }
+        async let place = PlaceFinder.shared.current()
         await loadDismissals(session: session)
         let open = reminders.items(for: .all, includeCompleted: false).prefix(Self.maxReminders)
         let request = PlanRequest(
@@ -142,7 +145,8 @@ final class PlannerStore {
                 )
             },
             timeZone: TimeZone.current.identifier,
-            now: JSONCoding.timestamp(Date())
+            now: JSONCoding.timestamp(Date()),
+            location: await place
         )
         do {
             let made: DayPlan = try await session.request("POST", "/api/plan", body: request, timeout: 120)

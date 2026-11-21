@@ -42,6 +42,7 @@ targets:
         "ENABLE_APP_SANDBOX[sdk=macosx*]": YES
         "ENABLE_OUTGOING_NETWORK_CONNECTIONS[sdk=macosx*]": YES
         "ENABLE_RESOURCE_ACCESS_CALENDARS[sdk=macosx*]": YES
+        "ENABLE_RESOURCE_ACCESS_LOCATION[sdk=macosx*]": YES
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
       configs:
         Release:

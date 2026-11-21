@@ -77,4 +77,17 @@ final class RemindersAITests: XCTestCase {
         XCTAssertEqual(APIPath.thread("x-apple-reminderkit://REMCDReminder/A B", "/messages"),
                        "/api/threads/x-apple-reminderkit%3A%2F%2FREMCDReminder%2FA%20B/messages")
     }
+
+    func testPlaceNameIsTheTownOrElseTheCountry() {
+        XCTAssertEqual(PlaceFinder.placeName(city: "East Hampton, NY", region: "United States"), "East Hampton, NY")
+        XCTAssertEqual(PlaceFinder.placeName(city: " ", region: "Iceland"), "Iceland")
+        XCTAssertNil(PlaceFinder.placeName(city: nil, region: nil))
+    }
+
+    func testSnapshotCarriesThePlaceOnlyWhenKnown() throws {
+        var snapshot = ReminderSnapshot(title: "T", notes: "", list: "", due: "", priority: "none", completed: false, timeZone: "UTC", now: "")
+        XCTAssertFalse(String(decoding: try JSONEncoder().encode(snapshot), as: UTF8.self).contains("location"))
+        snapshot.location = "New York, NY"
+        XCTAssertTrue(String(decoding: try JSONEncoder().encode(snapshot), as: UTF8.self).contains("\"location\":\"New York, NY\""))
+    }
 }

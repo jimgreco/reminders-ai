@@ -3,6 +3,8 @@
 // sends it the user's messages, polls its events, stores the conversation, and
 // turns its reminder tools into edits the iPhone applies through EventKit.
 
+import { describeNow } from "./context.js";
+
 export const AGENT_NAME = "Reminders AI";
 
 export const AGENT_SYSTEM = `You help one person get the items on their Apple Reminders list done. Each conversation is about a single reminder: the person opened it and asked you to work on it.
@@ -14,6 +16,7 @@ How to work:
 - Use web search and web fetch for anything that depends on current facts: prices, opening hours, requirements, forms, availability, reviews. Give the link for anything the person will need to open or check.
 - The person reads your replies on a phone, usually later, after a notification. Lead with the result or the decision you need from them. Keep replies short and concrete; use a short list only when the content is a list.
 - You cannot act in the outside world: you cannot buy, book, call, send or sign in anywhere. When a step needs the person, say exactly what to do and give them what they need for it (the link, the wording, the number to call, what to have ready).
+- Each message from the person starts with the reminder as it is now, the weekday and local time, and, when their phone shares it, the town they are in. Fit the next steps to both. Do not tell them to call an office, a support line or a contractor at a time it is closed (weekends, holidays, evenings): say when to call, and give them what they can do now instead. Do not send them on an errand that needs a place they are not in (their other home, a store in another town): offer what can be done from where they are, and what waits until they are there. Check opening hours when they matter. If the place a task needs is unclear, ask or leave place out of it.
 - The conversation continues for as long as the task does. When the person comes back with an answer or a follow-up, pick up where you left off.
 
 Keeping Apple Reminders up to date:
@@ -150,7 +153,8 @@ function describeReminder(reminder) {
     `Priority: ${reminder.priority || "none"}`,
     `Done: ${reminder.completed ? "yes" : "no"}`,
     `Notes: ${reminder.notes ? `\n${reminder.notes}` : "(none)"}`,
-    `[Now: ${reminder.now || new Date().toISOString()}${reminder.timeZone ? `, time zone ${reminder.timeZone}` : ""}]`
+    // The guidance travels with the message so it holds for agent versions set up before it was in the system prompt.
+    `[Now: ${describeNow(reminder.now, reminder.timeZone)}. The person is in: ${reminder.location || "not shared"}. Suggest steps that can be done on this day, at this hour and from this place; say what has to wait for another day or place.]`
   ];
   return lines.join("\n");
 }

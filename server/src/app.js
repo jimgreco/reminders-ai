@@ -1,5 +1,6 @@
 import crypto from "node:crypto";
 import { PlanError, validatePlanRequest } from "./planner.js";
+import { cleanLocation } from "./context.js";
 import appleSignin from "apple-signin-auth";
 import { OAuth2Client } from "google-auth-library";
 
@@ -127,6 +128,7 @@ export function validateReminder(value) {
     due: optionalText("due", 40),
     timeZone: optionalText("timeZone", 64),
     now: optionalText("now", 40),
+    location: cleanLocation(r.location),
     priority: PRIORITIES.includes(r.priority) ? r.priority : "none",
     completed: r.completed === true
   };

@@ -114,7 +114,7 @@ async function start(store, env = baseEnv()) {
   return { call, raw, signIn, agents, assistant, pushes, config, planClient, close: () => new Promise((r) => server.close(r)) };
 }
 
-const REMINDER = { title: "Renew passport", notes: "expires in March", list: "Personal", due: "2026-12-01", priority: "high", timeZone: "America/New_York" };
+const REMINDER = { title: "Renew passport", notes: "expires in March", list: "Personal", due: "2026-12-01", priority: "high", timeZone: "America/New_York", now: "2026-11-21T10:15:00-05:00", location: "East Hampton,\n NY" };
 const RID = "ABC-123/x";
 const threadPath = (suffix = "") => `/api/threads/${encodeURIComponent(RID)}${suffix}`;
 
@@ -194,7 +194,8 @@ function suite(name, makeStore) {
       assert.match(text, /Title: Renew passport/);
       assert.match(text, /Due: 2026-12-01/);
       assert.match(text, /expires in March/);
-      assert.match(text, /time zone America\/New_York/);
+      assert.match(text, /Now: Saturday, November 21, 2026 at 10:15\sAM \(time zone America\/New_York\)/);
+      assert.match(text, /The person is in: East Hampton, NY\./);
       assert.ok(text.endsWith("Work on this"));
     });
 
@@ -339,20 +340,26 @@ function suite(name, makeStore) {
         { id: "R-2", title: "Duplicate id is dropped" },
         { id: "R-3", title: "   " }
       ];
-      const r = await app.call("POST", "/api/plan", { token, body: { reminders, timeZone: "America/New_York", now: "2026-11-18T09:00:00-05:00" } });
+      const r = await app.call("POST", "/api/plan", { token, body: { reminders, timeZone: "America/New_York", now: "2026-11-18T09:00:00-05:00", location: "New York, NY" } });
       assert.equal(r.status, 200);
       assert.deepEqual(r.body.suggestions.map((s) => s.reminderId), ["R-1", "R-2"]);
       assert.equal(r.body.suggestions[0].assistantPrompt, "Work out the first step for me.");
       const sent = app.planClient.requests.at(-1);
       assert.equal(sent.output_config.format.type, "json_schema");
       const prompt = sent.messages[0].content;
-      assert.match(prompt, /time zone America\/New_York/);
+      assert.match(prompt, /Now: Wednesday, November 18, 2026 at 9:00\sAM \(time zone America\/New_York\)/);
+      assert.match(prompt, /Where the person is: New York, NY\./);
       assert.match(prompt, /"conversation":"idle"/);
       assert.ok(!prompt.includes("x".repeat(1001)), "notes are cut short");
       assert.ok(!prompt.includes("Duplicate"));
 
       assert.equal((await app.call("POST", "/api/plan", { body: { reminders } })).status, 401);
       assert.equal((await app.call("POST", "/api/plan", { token, body: { reminders: "all" } })).status, 400);
+      // No location and a time zone the server doesn't know: still a plan, with what it has.
+      await app.call("POST", "/api/plan", { token, body: { reminders, timeZone: "Mars/Olympus", now: "2026-11-18T09:00:00-05:00" } });
+      const bare = app.planClient.requests.at(-1).messages[0].content;
+      assert.match(bare, /Now: 2026-11-18T09:00:00-05:00 \(time zone Mars\/Olympus\)/);
+      assert.match(bare, /Where the person is: not shared\./);
       const empty = await app.call("POST", "/api/plan", { token, body: { reminders: [] } });
       assert.deepEqual(empty.body.suggestions, []);
     });
@@ -547,8 +554,8 @@ describe("agent definition and edits", () => {
   });
 
   test("the reminder snapshot is normalized", () => {
-    assert.deepEqual(validateReminder({ title: " T ", priority: "weird", completed: true }),
-      { title: "T", notes: "", list: "", due: "", timeZone: "", now: "", priority: "none", completed: true });
+    assert.deepEqual(validateReminder({ title: " T ", priority: "weird", completed: true, location: 7 }),
+      { title: "T", notes: "", list: "", due: "", timeZone: "", now: "", location: "", priority: "none", completed: true });
   });
 });
 

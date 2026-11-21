@@ -145,6 +145,8 @@ struct ReminderSnapshot: Encodable, Sendable {
     var completed: Bool
     var timeZone: String
     var now: String
+    /// The town the phone is in, when location is allowed.
+    var location: String?
 }
 
 struct ImageUpload: Encodable, Sendable {

@@ -92,10 +92,12 @@ final class AssistantStore {
         sending.insert(id)
         defer { sending.remove(id) }
         do {
+            var snapshot = item.snapshot()
+            snapshot.location = await PlaceFinder.shared.current()
             let images = photos.map { ImageUpload(mediaType: "image/jpeg", data: $0.base64EncodedString()) }
             let detail: ThreadDetail = try await session.request(
                 "POST", APIPath.thread(id, "/messages"),
-                body: MessageRequest(text: text, reminder: item.snapshot(), images: images)
+                body: MessageRequest(text: text, reminder: snapshot, images: images)
             )
             store(detail)
             lastError = nil
