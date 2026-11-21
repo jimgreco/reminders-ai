@@ -41,10 +41,21 @@ the same list.
 
 The card at the top of the home screen sends your open reminders (title, list,
 due date, priority, the first 1,000 characters of the notes, and the state of
-any assistant conversation) to `POST /api/plan`. One Claude call
+any assistant conversation) with the date, time and the town you are in to
+`POST /api/plan`. One Claude call
 (`server/src/planner.js`) picks up to six to make progress on today, each with
 why, a first step, and, where the assistant can help, the message that starts
 it. The server stores none of it; the plan is kept on the device for the day.
+
+The plan fits the day and the place. The planner is told the weekday and local
+time, so a call to an office or a support line is not a weekend pick (the next
+step becomes getting ready for it, with the day to call), and the town the
+phone is in, so a task at the other house is left out unless part of it can be
+done from here. It works out where a task belongs from its list, title and
+notes. Messages to the assistant carry the same two facts, so the next steps it
+suggests fit them too. The place is a name such as "East Hampton, NY", looked
+up on the device (`RemindersAI/PlaceFinder.swift`); coordinates never leave it,
+and with location off everything works as before, without the place.
 
 Checking a pick off hides it for the rest of the day, repeating reminders
 included. **Dismiss** leaves a reminder out for today, a week, a month, or for
@@ -58,7 +69,7 @@ the plan lists them, with Restore.
 | Where | What |
 |---|---|
 | Apple Reminders | every task: title, notes, dates, completion. Nothing is cached elsewhere. |
-| Server database | each thread's messages, the edits waiting for the iPhone, push tokens, sign-in sessions, and which reminder ids are dismissed from Plan My Day and until when. A reminder's details reach the server only when you message the assistant about it or plan your day (a plan is not stored). |
+| Server database | each thread's messages, the edits waiting for the iPhone, push tokens, sign-in sessions, and which reminder ids are dismissed from Plan My Day and until when. A reminder's details reach the server only when you message the assistant about it or plan your day (a plan is not stored). The name of the town you are in goes with both when location is allowed; it is passed to Claude and not stored. |
 | Anthropic | each session's conversation, until the session is deleted. |
 | iPhone Keychain | session tokens, this device only. |
 

@@ -3,6 +3,8 @@
 // assistant can help, the message that starts it. Nothing here is stored: the
 // reminders come from the phone with the request and the plan goes back to it.
 
+import { cleanLocation, describeNow } from "./context.js";
+
 export const PLAN_MODEL = "claude-opus-5-5";
 
 export const PLAN_LIMITS = { reminders: 400, titleChars: 500, notesChars: 1000, idChars: 255 };
@@ -17,6 +19,11 @@ What makes a good pick:
 - Something the AI assistant can push forward right now: research, comparisons, drafting an email or a plan, finding a form, working out steps. The assistant searches the web and writes, but it cannot buy, book, call, send or sign in anywhere.
 - A quick win the person can finish in a few minutes.
 - Balance: not all from one list unless that is clearly where the urgency is.
+
+Today has to be a day and a place where the step can actually happen. You are told the weekday, the local time, and, when the phone shares it, the town the person is in.
+- Place: many tasks can only be done somewhere (a house, a town, a store, an office). Work out where from the list name, title and notes; people often keep a list per home or place. Do not pick a task that needs the person somewhere they are not, unless a step can be done from where they are (a call, an email, an order, research); then make that the next step. Favor tasks that can only be done where they are now, since the chance may not come again soon. If no place is given, or a task's place is unclear, do not guess: leave place out of it.
+- Day and time: offices, support lines, banks, contractors, government agencies and many medical offices are closed or thinly staffed on weekends, holidays and evenings. On those days prefer what does not need them (online forms, errands, things around the house, work the assistant can do), or make the next step preparing for the call and say which day to make it. Late in the day, pick what still fits.
+- When place or day is the reason a task is in or out, say so in the reason or the summary.
 
 Avoid:
 - Reminders that are standing notes, wish lists, or someday ideas rather than tasks.
@@ -91,15 +98,16 @@ export function validatePlanRequest(body) {
       conversation: CONVERSATIONS.includes(r.conversation) ? r.conversation : "none"
     });
   }
-  return { reminders, timeZone: short(b.timeZone, 64), now: short(b.now, 40) };
+  return { reminders, timeZone: short(b.timeZone, 64), now: short(b.now, 40), location: cleanLocation(b.location) };
 }
 
-/** The user message: the date and the reminders, one JSON object per line. */
-export function planPrompt({ reminders, timeZone, now }) {
+/** The user message: the day, the place and the reminders, one JSON object per line. */
+export function planPrompt({ reminders, timeZone, now, location }) {
   const lines = reminders.map((r) => JSON.stringify(
     Object.fromEntries(Object.entries(r).filter(([, v]) => v !== "" && v !== "none"))
   ));
-  return `Now: ${now || new Date().toISOString()}${timeZone ? ` (time zone ${timeZone})` : ""}.\n` +
+  return `Now: ${describeNow(now, timeZone)}.\n` +
+    `Where the person is: ${location || "not shared"}.\n` +
     `Open reminders (${reminders.length}):\n${lines.join("\n")}`;
 }
 
