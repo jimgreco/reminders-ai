@@ -8,6 +8,7 @@ import pg from "pg";
 // Message: { id, threadId, role, text, options, createdAt }
 // Op:      { id, userId, threadId, reminderId, kind, payload, createdAt, appliedAt, error }
 // Dismissal: { reminderId, until (ISO string, or null for good) }; listed only while in force
+// Commitment: { week (a Monday, YYYY-MM-DD), id (c1-c9), text, measure, area, active, reminderId, done, completedAt }
 
 const THREAD_FIELDS = ["title", "sessionId", "status", "pendingToolUseId", "unread"];
 
@@ -22,6 +23,7 @@ export class MemoryStore {
     this.ops = [];
     this.devices = new Map();
     this.dismissals = new Map();
+    this.commitments = [];
   }
 
   async upsertUserByIdentity({ provider, subject, email, emailVerified }) {
@@ -42,6 +44,12 @@ export class MemoryStore {
 
   async getUser(id) {
     const user = this.users.get(id);
+    return user ? { ...user } : null;
+  }
+
+  async getUserByEmail(email) {
+    const wanted = email.toLowerCase();
+    const user = [...this.users.values()].find((u) => u.email.toLowerCase() === wanted);
     return user ? { ...user } : null;
   }
 
@@ -70,6 +78,7 @@ export class MemoryStore {
     for (const [id, t] of this.threads) if (t.userId === userId) await this.#dropThread(id);
     for (const [token, d] of this.devices) if (d.userId === userId) this.devices.delete(token);
     this.dismissals.delete(userId);
+    this.commitments = this.commitments.filter((c) => c.userId !== userId);
   }
 
   async #dropThread(id) {
@@ -215,6 +224,59 @@ export class MemoryStore {
     return this.dismissals.get(userId)?.delete(reminderId) ?? false;
   }
 
+  /** Replaces the accepted set for a week: listed items become active (new ones
+   *  are added, wording is updated), the week's others inactive. Returns
+   *  whether anything changed. */
+  async setCommitments(userId, week, items) {
+    let changed = false;
+    const mine = this.commitments.filter((c) => c.userId === userId && c.week === week);
+    const wanted = new Map(items.map((i) => [i.id, i]));
+    for (const row of mine) {
+      const item = wanted.get(row.id);
+      wanted.delete(row.id);
+      const next = item
+        ? { text: item.text, measure: item.measure ?? null, area: item.area, active: true }
+        : { active: false };
+      for (const [key, value] of Object.entries(next)) {
+        if (row[key] !== value) {
+          row[key] = value;
+          changed = true;
+        }
+      }
+    }
+    for (const item of wanted.values()) {
+      this.commitments.push({
+        userId, week, id: item.id, text: item.text, measure: item.measure ?? null, area: item.area,
+        active: true, reminderId: null, done: false, completedAt: null
+      });
+      changed = true;
+    }
+    return changed;
+  }
+
+  /** One week's commitments, or with `since` every week from that Monday on. */
+  async listCommitments(userId, { week = null, since = null } = {}) {
+    return this.commitments
+      .filter((c) => c.userId === userId && (week ? c.week === week : !since || c.week >= since))
+      .sort((a, b) => a.week.localeCompare(b.week) || a.id.localeCompare(b.id))
+      .map(({ userId: _userId, ...c }) => ({ ...c }));
+  }
+
+  /** What the iPhone found: the reminder made for a commitment (null once it
+   *  has been removed) and whether it is checked off. Unknown rows are skipped. */
+  async reportCommitments(userId, reports) {
+    let updated = 0;
+    for (const report of reports) {
+      const row = this.commitments.find((c) => c.userId === userId && c.week === report.week && c.id === report.id);
+      if (!row) continue;
+      row.reminderId = report.reminderId;
+      row.done = report.done;
+      row.completedAt = report.done ? report.completedAt : null;
+      updated += 1;
+    }
+    return updated;
+  }
+
   async health() {
     return true;
   }
@@ -246,6 +308,13 @@ function messageFromRow(r) {
 function withoutImageData(message) {
   const attachments = message.attachments?.map(({ id, mediaType }) => ({ id, mediaType })) ?? null;
   return { ...message, attachments };
+}
+
+function commitmentFromRow(r) {
+  return {
+    week: r.week, id: r.item_id, text: r.text, measure: r.measure, area: r.area, active: r.active,
+    reminderId: r.reminder_id, done: r.done, completedAt: iso(r.completed_at)
+  };
 }
 
 function opFromRow(r) {
@@ -315,6 +384,13 @@ export class PostgresStore {
 
   async getUser(id) {
     const { rows } = await this.pool.query("SELECT * FROM rai_users WHERE id = $1", [id]);
+    return rows[0] ? userFromRow(rows[0]) : null;
+  }
+
+  async getUserByEmail(email) {
+    const { rows } = await this.pool.query(
+      "SELECT * FROM rai_users WHERE lower(email) = lower($1) ORDER BY created_at LIMIT 1", [email]
+    );
     return rows[0] ? userFromRow(rows[0]) : null;
   }
 
@@ -529,6 +605,61 @@ export class PostgresStore {
       "DELETE FROM rai_plan_dismissals WHERE user_id = $1 AND reminder_id = $2", [userId, reminderId]
     );
     return rowCount > 0;
+  }
+
+  async setCommitments(userId, week, items) {
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      let changed = 0;
+      for (const item of items) {
+        const { rowCount } = await client.query(
+          `INSERT INTO rai_commitments (user_id, week, item_id, text, measure, area) VALUES ($1, $2, $3, $4, $5, $6)
+           ON CONFLICT (user_id, week, item_id) DO UPDATE
+             SET text = EXCLUDED.text, measure = EXCLUDED.measure, area = EXCLUDED.area, active = true, updated_at = now()
+           WHERE (rai_commitments.text, rai_commitments.measure, rai_commitments.area, rai_commitments.active)
+             IS DISTINCT FROM (EXCLUDED.text, EXCLUDED.measure, EXCLUDED.area, true)`,
+          [userId, week, item.id, item.text, item.measure ?? null, item.area]
+        );
+        changed += rowCount;
+      }
+      const { rowCount } = await client.query(
+        `UPDATE rai_commitments SET active = false, updated_at = now()
+         WHERE user_id = $1 AND week = $2 AND active AND NOT (item_id = ANY($3::text[]))`,
+        [userId, week, items.map((i) => i.id)]
+      );
+      await client.query("COMMIT");
+      return changed + rowCount > 0;
+    } catch (error) {
+      await client.query("ROLLBACK").catch(() => {});
+      throw error;
+    } finally {
+      client.release();
+    }
+  }
+
+  async listCommitments(userId, { week = null, since = null } = {}) {
+    const { rows } = await this.pool.query(
+      `SELECT to_char(week, 'YYYY-MM-DD') AS week, item_id, text, measure, area, active, reminder_id, done, completed_at
+         FROM rai_commitments
+        WHERE user_id = $1 AND ($2::date IS NULL OR week = $2) AND ($2::date IS NOT NULL OR $3::date IS NULL OR week >= $3)
+        ORDER BY week, item_id`,
+      [userId, week, since]
+    );
+    return rows.map(commitmentFromRow);
+  }
+
+  async reportCommitments(userId, reports) {
+    let updated = 0;
+    for (const report of reports) {
+      const { rowCount } = await this.pool.query(
+        `UPDATE rai_commitments SET reminder_id = $4, done = $5, completed_at = $6, updated_at = now()
+         WHERE user_id = $1 AND week = $2 AND item_id = $3`,
+        [userId, report.week, report.id, report.reminderId, report.done, report.done ? report.completedAt : null]
+      );
+      updated += rowCount;
+    }
+    return updated;
   }
 
   async health() {

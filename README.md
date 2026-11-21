@@ -64,19 +64,41 @@ good; dismissals are stored on the server by reminder id
 those reminders before Claude sees the list. **Not Suggesting** at the bottom of
 the plan lists them, with Restore.
 
+## Commitments from the weekly review
+
+The weekly review site (`jimgreco/weekly-review`) proposes a few commitments
+each Sunday. The ones you accept there become reminders here:
+
+1. The site sends the accepted set for a week to `PUT /api/commitments?week=<monday>`
+   with its own token, every time it changes. The server stores them and sends
+   a silent push.
+2. On its next sync the iPhone makes a reminder for each in a "Weekly
+   Commitments" list (created on first use, not shared), due that Sunday, with
+   how the commitment is judged in the notes. It reports each reminder's id.
+3. Check one off, in this app or in Reminders, and the next sync reports it.
+   The site reads that back (`GET /api/commitments?week=<monday>`) so the next
+   review can use it as evidence for a commitment no app measures.
+4. Un-accept a commitment and its open reminder is removed. When the review
+   scores the week, the reminders still open are removed and the finished
+   ones stay in Completed.
+
+A reminder you delete yourself is not made again. The site's token
+(`COMMITMENTS_TOKEN_SHA256`, bound to `COMMITMENTS_EMAIL`) works on
+`/api/commitments` only; a signed-in user's token does not work there.
+
 ## What is stored where
 
 | Where | What |
 |---|---|
 | Apple Reminders | every task: title, notes, dates, completion. Nothing is cached elsewhere. |
-| Server database | each thread's messages, the edits waiting for the iPhone, push tokens, sign-in sessions, and which reminder ids are dismissed from Plan My Day and until when. A reminder's details reach the server only when you message the assistant about it or plan your day (a plan is not stored). The name of the town you are in goes with both when location is allowed; it is passed to Claude and not stored. |
+| Server database | each thread's messages, the edits waiting for the iPhone, push tokens, sign-in sessions, which reminder ids are dismissed from Plan My Day and until when, and the commitments accepted on the weekly review (their wording, their reminder's id and whether it is checked off). A reminder's details reach the server only when you message the assistant about it or plan your day (a plan is not stored). The name of the town you are in goes with both when location is allowed; it is passed to Claude and not stored. |
 | Anthropic | each session's conversation, until the session is deleted. |
 | iPhone Keychain | session tokens, this device only. |
 
 ## Layout
 
 - `server/` Node 22 API: `src/app.js` routes, `src/agent.js` the agent
-  definition and session loop, `src/planner.js` Plan My Day, `src/store.js` memory and Postgres stores,
+  definition and session loop, `src/planner.js` Plan My Day, `src/commitments.js` the weekly review's commitments, `src/store.js` memory and Postgres stores,
   `src/push.js` APNs, `scripts/setup-agent.js` one-time agent setup, `db/`
   migrations, `test/`.
 - `RemindersAI/` iPhone app; `RemindersAITests/` unit tests. `project.yml` is
@@ -118,6 +140,7 @@ xcodebuild -project RemindersAI.xcodeproj -scheme RemindersAI -destination 'plat
 | `ANTHROPIC_API_KEY`, `AGENT_ID`, `AGENT_ENVIRONMENT_ID` | The Claude agent. The two ids are required in production. |
 | `SESSION_BUDGET_CENTS` | Spending cap per agent session at list prices. Default 500; 0 for none. |
 | `APNS_KEY_ID`, `APNS_TEAM_ID`, `APNS_PRIVATE_KEY` | Push notifications. All three or none. |
+| `COMMITMENTS_TOKEN_SHA256`, `COMMITMENTS_EMAIL` | Hex SHA-256 of the weekly review site's token, and the account its commitments belong to. Either unset turns `/api/commitments` off (404). |
 | `TRUST_PROXY_HOPS` | `1` behind nginx-proxy, for rate-limit IPs. |
 
 ## Release

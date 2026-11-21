@@ -1,6 +1,9 @@
 import crypto from "node:crypto";
 import { PlanError, validatePlanRequest } from "./planner.js";
 import { cleanLocation } from "./context.js";
+import {
+  CommitmentError, followSince, forPhone, forReviewSite, serviceTokenMatches, validWeek, validateCommitments, validateReports
+} from "./commitments.js";
 import appleSignin from "apple-signin-auth";
 import { OAuth2Client } from "google-auth-library";
 
@@ -49,8 +52,15 @@ export function loadConfig(env = process.env) {
     agentId: env.AGENT_ID || "",
     environmentId: env.AGENT_ENVIRONMENT_ID || "",
     // Spending cap per agent session, in cents at list prices. 0 = no cap.
-    sessionBudgetCents: Number(env.SESSION_BUDGET_CENTS ?? 500)
+    sessionBudgetCents: Number(env.SESSION_BUDGET_CENTS ?? 500),
+    // The weekly review site sends accepted commitments with this token, for
+    // this account only. Either unset turns /api/commitments off (404).
+    commitmentsTokenSha256: String(env.COMMITMENTS_TOKEN_SHA256 || "").trim().toLowerCase(),
+    commitmentsEmail: String(env.COMMITMENTS_EMAIL || "").trim().toLowerCase()
   };
+  if (config.commitmentsTokenSha256 && !/^[0-9a-f]{64}$/.test(config.commitmentsTokenSha256)) {
+    throw new Error("COMMITMENTS_TOKEN_SHA256 must be a hex SHA-256");
+  }
   if (config.sessionSecret.length < 32) throw new Error("SESSION_SECRET must be at least 32 characters");
   if (!Number.isInteger(config.sessionBudgetCents) || config.sessionBudgetCents < 0) {
     throw new Error("SESSION_BUDGET_CENTS must be a whole number of cents");
@@ -174,7 +184,7 @@ function publicMessage(m) {
   };
 }
 
-export function createApp({ store, config, assistant, planner = null, verifyAppleToken, verifyGoogleToken, now = () => new Date() }) {
+export function createApp({ store, config, assistant, planner = null, push = null, verifyAppleToken, verifyGoogleToken, now = () => new Date() }) {
   const buckets = new Map();
 
   verifyAppleToken ??= async (identityToken) =>
@@ -361,6 +371,35 @@ export function createApp({ store, config, assistant, planner = null, verifyAppl
 
     const retry = limited(request, "api", 1200, 15 * 60_000);
     if (retry) return send(response, 429, { error: "rate limited" }, { "retry-after": String(retry) });
+
+    // The weekly review site: the accepted commitments for a week in (PUT),
+    // which ones have a reminder and are checked off out (GET). Its own token,
+    // checked here and nowhere else; anything wrong is a 404, as if the route
+    // did not exist.
+    if (path === "/api/commitments") {
+      if (!config.commitmentsEmail || !serviceTokenMatches(config.commitmentsTokenSha256, request.headers.authorization)) {
+        return send(response, 404, { error: "not found" });
+      }
+      if (method !== "GET" && method !== "PUT") return send(response, 405, { error: "method not allowed" });
+      const week = url.searchParams.get("week");
+      if (!validWeek(week)) throw new HttpError(400, "week must be a Monday (YYYY-MM-DD)");
+      const owner = await store.getUserByEmail(config.commitmentsEmail);
+      if (!owner) return send(response, 409, { error: "the owner has not signed in to the app yet" });
+      if (method === "PUT") {
+        let items;
+        try {
+          items = validateCommitments(await readJSON(request));
+        } catch (error) {
+          if (error instanceof CommitmentError) throw new HttpError(400, error.message);
+          throw error;
+        }
+        const changed = await store.setCommitments(owner.id, week, items);
+        // A silent push: the iPhone syncs and makes or removes the reminders.
+        if (changed && push) push.notify(owner.id, {}).catch((error) => console.error(`commitments: push failed: ${error.message}`));
+      }
+      return send(response, 200, forReviewSite(week, await store.listCommitments(owner.id, { week })));
+    }
+
     const user = await authenticate(request);
 
     if (method === "GET" && path === "/api/me") {
@@ -370,11 +409,33 @@ export function createApp({ store, config, assistant, planner = null, verifyAppl
     // Everything the app needs on launch or after a push: which reminders
     // have a thread and its state, and the edits waiting to be applied.
     if (method === "GET" && path === "/api/sync") {
-      const [threads, ops] = await Promise.all([store.listThreads(user.id), store.listPendingOps(user.id)]);
+      const [threads, ops, commitments] = await Promise.all([
+        store.listThreads(user.id),
+        store.listPendingOps(user.id),
+        // Sync still works if commitments can't be read (say, before the migration that adds them).
+        store.listCommitments(user.id, { since: followSince(now()) }).catch((error) => {
+          console.error(`sync: commitments unavailable: ${error.message}`);
+          return [];
+        })
+      ]);
       return send(response, 200, {
         threads: threads.map(threadSummary),
-        ops: ops.map((o) => ({ id: o.id, reminderId: o.reminderId, kind: o.kind, payload: o.payload, createdAt: o.createdAt }))
+        ops: ops.map((o) => ({ id: o.id, reminderId: o.reminderId, kind: o.kind, payload: o.payload, createdAt: o.createdAt })),
+        commitments: commitments.map(forPhone)
       });
+    }
+
+    // The iPhone says which reminder it made for each commitment and whether
+    // it is checked off.
+    if (method === "POST" && path === "/api/commitments/report") {
+      let reports;
+      try {
+        reports = validateReports(await readJSON(request));
+      } catch (error) {
+        if (error instanceof CommitmentError) throw new HttpError(400, error.message);
+        throw error;
+      }
+      return send(response, 200, { updated: await store.reportCommitments(user.id, reports) });
     }
 
     // Plan my day: the open reminders in, a few picks for today out. The plan

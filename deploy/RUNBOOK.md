@@ -129,3 +129,42 @@ the server logs `sign-in refused for Apple sub <id>`; put that id in
 Backups follow the shared standard (consolidated-deploy `scripts/backup-pilot`).
 After the first nightly run, run the restore test once by hand and confirm the
 freshness workflow passes.
+
+## 7. Commitments from the weekly review (optional)
+
+The weekly review site sends the commitments you accept; the iPhone makes a
+reminder for each in a "Weekly Commitments" list and the site reads back which
+ones you checked off. Off until both variables below are set.
+
+1. Apply the migration `db/004_commitments.sql` (§3, with the released image).
+   Until then the app works as before and the site's requests fail and are
+   dropped.
+2. On your Mac, make the token. The plaintext goes only to the review site;
+   this server keeps its SHA-256:
+
+   ```bash
+   umask 077 && mkdir -p ~/wr-tokens && cd ~/wr-tokens
+   openssl rand -hex 32 > tasks-commitments.token
+   printf %s "$(cat tasks-commitments.token)" | shasum -a 256 | cut -d' ' -f1 > tasks-commitments.sha256
+   ```
+3. Add to `~/deploy/reminders-ai.env` and recreate the service with its
+   recorded Compose files (a configuration change of its own, not part of a
+   release):
+
+   ```
+   COMMITMENTS_TOKEN_SHA256=<contents of tasks-commitments.sha256>
+   COMMITMENTS_EMAIL=<the email you sign in to the app with>
+   ```
+4. Give the review site the plaintext (weekly-review `deploy/RUNBOOK.md` §6),
+   then delete `~/wr-tokens`.
+5. Check from your Mac, before deleting the token: the first prints `404`, the
+   second `{"week":"…","items":[…]}`.
+
+   ```bash
+   curl -s -o /dev/null -w '%{http_code}\n' 'https://tasks.jim-greco.com/api/commitments?week=2026-11-23'
+   curl -s -H "Authorization: Bearer $(cat ~/wr-tokens/tasks-commitments.token)" 'https://tasks.jim-greco.com/api/commitments?week=2026-11-23'
+   ```
+
+The token works on `/api/commitments` only and cannot choose another account.
+To turn the link off, clear either variable and recreate the service; reminders
+already made stay in Reminders.

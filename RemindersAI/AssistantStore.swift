@@ -2,7 +2,8 @@ import Foundation
 import Observation
 
 /// The assistant's side of each reminder: thread state from the server, and
-/// the edits it queued, which this class applies to Apple Reminders.
+/// the edits it queued, which this class applies to Apple Reminders. The same
+/// sync keeps the reminders for the weekly review's commitments.
 @MainActor
 @Observable
 final class AssistantStore {
@@ -44,7 +45,7 @@ final class AssistantStore {
             let response: SyncResponse = try await session.request("GET", "/api/sync")
             threads = Dictionary(response.threads.map { ($0.reminderId, $0) }, uniquingKeysWith: { a, _ in a })
             lastError = nil
-            guard !response.ops.isEmpty, reminders.access == .granted else { return }
+            guard reminders.access == .granted else { return }
             for op in response.ops {
                 var failure: String?
                 do {
@@ -57,7 +58,15 @@ final class AssistantStore {
                     "POST", "/api/ops/\(op.id)/ack", body: failure.map { ["error": $0] } ?? [:]
                 )
             }
-            await reminders.reload()
+            if !response.ops.isEmpty { await reminders.reload() }
+            // Commitments accepted on the weekly review: keep a reminder for each
+            // and say which are checked off. A report that fails is made again next sync.
+            let reports = await reminders.reconcile(response.commitments ?? [])
+            if !reports.isEmpty {
+                let _: EmptyResponse? = try? await session.request(
+                    "POST", "/api/commitments/report", body: CommitmentReports(items: reports)
+                )
+            }
         } catch APIError.offline {
             // Reminders keep working offline; the next sync catches up.
         } catch APIError.signedOut {

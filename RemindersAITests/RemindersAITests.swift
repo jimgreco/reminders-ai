@@ -58,6 +58,54 @@ final class RemindersAITests: XCTestCase {
         XCTAssertEqual(sync.ops.first?.payload, OpPayload())
     }
 
+    func testSyncResponseCarriesCommitmentsWhenTheServerSendsThem() throws {
+        let json = #"""
+        {"threads":[],"ops":[],"commitments":[
+          {"week":"2026-11-23","id":"c1","text":"Book the dentist","measure":null,"area":"home","active":true,
+           "reminderId":null,"done":false,"due":"2026-11-29"}]}
+        """#
+        let sync = try JSONCoding.decoder.decode(SyncResponse.self, from: Data(json.utf8))
+        XCTAssertEqual(sync.commitments, [Commitment(week: "2026-11-23", id: "c1", text: "Book the dentist", measure: nil,
+                                                     active: true, reminderId: nil, done: false, due: "2026-11-29")])
+        let older = try JSONCoding.decoder.decode(SyncResponse.self, from: Data(#"{"threads":[],"ops":[]}"#.utf8))
+        XCTAssertNil(older.commitments)
+    }
+
+    func testCommitmentActions() {
+        func commitment(active: Bool = true, reminderId: String? = nil, done: Bool = false) -> Commitment {
+            Commitment(week: "2026-11-23", id: "c1", text: "Walk", measure: nil, active: active,
+                       reminderId: reminderId, done: done, due: "2026-11-29")
+        }
+        // No reminder yet: make one only while it is wanted.
+        XCTAssertEqual(CommitmentSync.action(for: commitment(), reminderCompleted: nil), .create)
+        XCTAssertEqual(CommitmentSync.action(for: commitment(active: false), reminderCompleted: nil), .none)
+        // A reminder this phone can't find yet is left alone, never made twice.
+        XCTAssertEqual(CommitmentSync.action(for: commitment(reminderId: "r"), reminderCompleted: nil), .none)
+        XCTAssertEqual(CommitmentSync.action(for: commitment(active: false, reminderId: "r"), reminderCompleted: nil), .none)
+        // Checking off, and un-checking, are reported once.
+        XCTAssertEqual(CommitmentSync.action(for: commitment(reminderId: "r"), reminderCompleted: true), .report(done: true))
+        XCTAssertEqual(CommitmentSync.action(for: commitment(reminderId: "r", done: true), reminderCompleted: true), .none)
+        XCTAssertEqual(CommitmentSync.action(for: commitment(reminderId: "r", done: true), reminderCompleted: false), .report(done: false))
+        XCTAssertEqual(CommitmentSync.action(for: commitment(reminderId: "r"), reminderCompleted: false), .none)
+        // Un-accepted or scored: an open reminder goes, a finished one stays.
+        XCTAssertEqual(CommitmentSync.action(for: commitment(active: false, reminderId: "r"), reminderCompleted: false), .remove)
+        XCTAssertEqual(CommitmentSync.action(for: commitment(active: false, reminderId: "r"), reminderCompleted: true), .report(done: true))
+        XCTAssertEqual(CommitmentSync.action(for: commitment(active: false, reminderId: "r", done: true), reminderCompleted: true), .none)
+    }
+
+    func testCommitmentNotesAndReport() throws {
+        var commitment = Commitment(week: "2026-11-23", id: "c2", text: "Protein", measure: "Macrovana: 6 Complete days",
+                                    active: true, reminderId: nil, done: false, due: "2026-11-29")
+        XCTAssertEqual(CommitmentSync.notes(for: commitment), "How it's judged: Macrovana: 6 Complete days\nFrom your weekly review.")
+        commitment.measure = nil
+        XCTAssertEqual(CommitmentSync.notes(for: commitment), "From your weekly review.")
+        // A removed reminder is reported without an id, which the server reads as none.
+        let removed = CommitmentReports(items: [CommitmentReport(week: "2026-11-23", id: "c2", reminderId: nil, done: false)])
+        let json = String(decoding: try JSONEncoder().encode(removed), as: UTF8.self)
+        XCTAssertFalse(json.contains("reminderId"))
+        XCTAssertTrue(json.contains("\"done\":false"))
+    }
+
     func testOpenQuestionOnlyWhileWaiting() throws {
         let json = #"""
         {"reminderId":"r1","title":"T","status":"needs_input","unread":false,"updatedAt":"2026-11-18T12:00:00Z",

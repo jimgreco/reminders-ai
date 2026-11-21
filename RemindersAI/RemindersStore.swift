@@ -520,6 +520,92 @@ final class RemindersStore {
         }
     }
 
+    // MARK: Commitments from the weekly review
+
+    /// Brings Reminders in step with the commitments the server sent: makes a
+    /// reminder for each accepted one, removes the open reminder of one that is
+    /// no longer wanted, and notes which were checked off. Returns what the
+    /// server should be told. A commitment that fails is left for the next sync.
+    func reconcile(_ commitments: [Commitment]) async -> [CommitmentReport] {
+        guard access == .granted, !commitments.isEmpty else { return [] }
+        var reports: [CommitmentReport] = []
+        var changed = false
+        for commitment in commitments {
+            let existing = commitment.reminderId.flatMap { reminder(externalId: $0) }
+            switch CommitmentSync.action(for: commitment, reminderCompleted: existing?.isCompleted) {
+            case .none:
+                break
+            case .create:
+                // One made earlier whose report never arrived, or made by another device, is taken up.
+                guard let reminder = try? adopted(for: commitment) ?? created(for: commitment) else { continue }
+                changed = true
+                reports.append(report(commitment, reminder))
+            case .remove:
+                guard let existing, (try? eventStore.remove(existing, commit: true)) != nil else { continue }
+                changed = true
+                reports.append(CommitmentReport(week: commitment.week, id: commitment.id, reminderId: nil, done: false))
+            case .report:
+                guard let existing else { continue }
+                reports.append(report(commitment, existing))
+            }
+        }
+        if changed { await reload() }
+        return reports
+    }
+
+    private func report(_ commitment: Commitment, _ reminder: EKReminder) -> CommitmentReport {
+        CommitmentReport(
+            week: commitment.week, id: commitment.id,
+            reminderId: reminder.calendarItemExternalIdentifier ?? reminder.calendarItemIdentifier,
+            done: reminder.isCompleted,
+            completedAt: reminder.isCompleted ? reminder.completionDate.map(JSONCoding.timestamp) : nil
+        )
+    }
+
+    /// A reminder already in the commitments list with this commitment's title and due date.
+    private func adopted(for commitment: Commitment) -> EKReminder? {
+        items.first {
+            $0.listTitle == CommitmentSync.listTitle && $0.title == commitment.text
+                && DueDate.string(from: $0.due) == commitment.due
+        }.flatMap { reminder(id: $0.id) }
+    }
+
+    private func created(for commitment: Commitment) throws -> EKReminder {
+        guard let due = DueDate.components(from: commitment.due) else {
+            throw ReminderEditError.invalid("Bad due date: \(commitment.due)")
+        }
+        let reminder = EKReminder(eventStore: eventStore)
+        reminder.title = commitment.text
+        reminder.notes = CommitmentSync.notes(for: commitment)
+        reminder.calendar = try commitmentsCalendar()
+        setDue(due, on: reminder)
+        try save(reminder)
+        return reminder
+    }
+
+    /// The "Weekly Commitments" list, made the first time it is needed. Found
+    /// again by its identifier, so renaming it in Reminders is fine.
+    private func commitmentsCalendar() throws -> EKCalendar {
+        let key = "commitmentsListId"
+        let lists = eventStore.calendars(for: .reminder).filter(\.allowsContentModifications)
+        let saved = UserDefaults.standard.string(forKey: key)
+        if let found = lists.first(where: { $0.calendarIdentifier == saved })
+            ?? lists.first(where: { $0.title == CommitmentSync.listTitle }) {
+            UserDefaults.standard.set(found.calendarIdentifier, forKey: key)
+            return found
+        }
+        let source = eventStore.defaultCalendarForNewReminders()?.source
+            ?? eventStore.sources.first { $0.sourceType == .calDAV || $0.sourceType == .local }
+        guard let source else { throw ReminderEditError.invalid("No Reminders account can hold a new list.") }
+        let calendar = EKCalendar(for: .reminder, eventStore: eventStore)
+        calendar.title = CommitmentSync.listTitle
+        calendar.cgColor = ListColor.green.uiColor.cgColor
+        calendar.source = source
+        try eventStore.saveCalendar(calendar, commit: true)
+        UserDefaults.standard.set(calendar.calendarIdentifier, forKey: key)
+        return calendar
+    }
+
     private func write(_ payload: OpPayload, to reminder: EKReminder) throws {
         if let title = payload.title { reminder.title = title }
         if let notes = payload.notes { reminder.notes = notes.isEmpty ? nil : notes }

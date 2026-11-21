@@ -34,7 +34,7 @@ else if (!config.production && process.env.REMINDERS_AI_FAKE_AGENT === "1") plan
 const planner = new Planner({ client: planClient });
 assistant.start();
 
-const server = http.createServer(createApp({ store, config, assistant, planner }));
+const server = http.createServer(createApp({ store, config, assistant, planner, push }));
 server.requestTimeout = 60_000;
 server.headersTimeout = 15_000;
 server.listen(config.port, () => console.log(`reminders-ai listening on :${config.port} (build ${config.build})`));
