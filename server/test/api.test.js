@@ -3,7 +3,7 @@ import { FakePlanClient, Planner } from "../src/planner.js";
 import assert from "node:assert/strict";
 import http from "node:http";
 import pg from "pg";
-import { createApp, loadConfig, validateReminder } from "../src/app.js";
+import { createApp, loadConfig, sha256Hex, validateReminder } from "../src/app.js";
 import { Assistant, agentDefinition, validateReminderEdit } from "../src/agent.js";
 import { Pusher, buildPayload, loadPushConfig } from "../src/push.js";
 import { MemoryStore, PostgresStore } from "../src/store.js";
@@ -11,6 +11,8 @@ import { migrate } from "../src/migrate.js";
 
 const OWNER = "owner@example.com";
 const quiet = { warn() {}, error() {}, log() {} };
+// The weekly review site's token for /api/commitments.
+const REVIEW_TOKEN = "review-site-token-0123456789";
 
 function baseEnv(extra = {}) {
   return {
@@ -20,6 +22,8 @@ function baseEnv(extra = {}) {
     ALLOWED_EMAILS: OWNER,
     AGENT_ID: "agent_test",
     AGENT_ENVIRONMENT_ID: "env_test",
+    COMMITMENTS_TOKEN_SHA256: sha256Hex(REVIEW_TOKEN),
+    COMMITMENTS_EMAIL: OWNER.toUpperCase(),
     ...extra
   };
 }
@@ -91,7 +95,7 @@ async function start(store, env = baseEnv()) {
   const assistant = new Assistant({ store, client: agents, config, push, log: quiet });
   const planClient = new FakePlanClient();
   const planner = new Planner({ client: planClient });
-  const server = http.createServer(createApp({ store, config, assistant, planner, verifyAppleToken: fakeApple, verifyGoogleToken: fakeApple }));
+  const server = http.createServer(createApp({ store, config, assistant, planner, push, verifyAppleToken: fakeApple, verifyGoogleToken: fakeApple }));
   await new Promise((resolve) => server.listen(0, "127.0.0.1", resolve));
   const base = `http://127.0.0.1:${server.address().port}`;
   const call = async (method, path, { body, token } = {}) => {
@@ -462,7 +466,7 @@ function suite(name, makeStore) {
       assert.equal((await app.call("POST", "/api/devices", { token, body: { token: "ab".repeat(32), sandbox: true } })).status, 200);
       assert.equal((await app.call("DELETE", threadPath(), { token })).status, 200);
       assert.equal((await app.call("GET", threadPath(), { token })).status, 404);
-      assert.deepEqual((await app.call("GET", "/api/sync", { token })).body, { threads: [], ops: [] });
+      assert.deepEqual((await app.call("GET", "/api/sync", { token })).body, { threads: [], ops: [], commitments: [] });
     });
 
     test("refresh tokens rotate, and a lost reply doesn't sign you out", async () => {
@@ -479,6 +483,81 @@ function suite(name, makeStore) {
       assert.equal((await app.call("POST", "/auth/signout", { body: { refreshToken: session.refreshToken } })).status, 200);
       assert.equal((await refresh(session.refreshToken)).status, 401);
       assert.equal((await refresh("not-a-token")).status, 401);
+    });
+
+    test("accepted commitments reach the phone, and its check-offs reach the review site", async () => {
+      // This week's Monday, as the review site names a week.
+      const today = new Date();
+      const week = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate() - ((today.getUTCDay() + 6) % 7)))
+        .toISOString().slice(0, 10);
+      const sunday = new Date(Date.parse(`${week}T00:00:00Z`) + 6 * 86_400_000).toISOString().slice(0, 10);
+      const path = `/api/commitments?week=${week}`;
+      const site = (method, body, at = path) => app.call(method, at, { token: REVIEW_TOKEN, body });
+      const synced = async () => (await app.call("GET", "/api/sync", { token })).body.commitments;
+      const report = (items) => app.call("POST", "/api/commitments/report", { token, body: { items } });
+
+      // Only the review site's token works here, and it works nowhere else.
+      assert.equal((await app.call("GET", path)).status, 404);
+      assert.equal((await app.call("GET", path, { token })).status, 404, "a signed-in user's token is not the site's");
+      assert.equal((await app.call("GET", path, { token: "wrong-token-0123456789abc" })).status, 404);
+      assert.equal((await app.call("GET", "/api/sync", { token: REVIEW_TOKEN })).status, 401);
+      assert.equal((await site("GET", undefined, "/api/commitments?week=2026-11-24")).status, 400, "a Tuesday");
+      assert.equal((await site("POST", { items: [] })).status, 405);
+      assert.equal((await site("PUT", { items: [{ id: "c1", text: "" }] })).status, 400);
+      assert.equal((await site("PUT", { items: [{ id: "x1", text: "Walk" }] })).status, 400);
+      assert.equal((await site("PUT", { items: [{ id: "c1", text: "a" }, { id: "c1", text: "b" }] })).status, 400);
+
+      const items = [
+        { id: "c1", text: "Hit 140 g protein on 6 days", measure: "Macrovana: 6 Complete days", area: "nutrition" },
+        { id: "c3", text: "Book the dentist\n", area: "home" }
+      ];
+      const before = app.pushes.length;
+      const put = await site("PUT", { items });
+      assert.equal(put.status, 200);
+      assert.deepEqual(put.body, { week, items: [
+        { id: "c1", active: true, reminder: false, done: false, completedAt: null },
+        { id: "c3", active: true, reminder: false, done: false, completedAt: null }
+      ] });
+      assert.deepEqual(app.pushes.slice(before), [{}], "one silent push wakes the phone");
+      await site("PUT", { items });
+      assert.equal(app.pushes.length, before + 1, "sending the same set again changes nothing");
+
+      assert.deepEqual(await synced(), [
+        { week, id: "c1", text: "Hit 140 g protein on 6 days", measure: "Macrovana: 6 Complete days", area: "nutrition", active: true, reminderId: null, done: false, due: sunday },
+        { week, id: "c3", text: "Book the dentist", measure: null, area: "home", active: true, reminderId: null, done: false, due: sunday }
+      ]);
+
+      // The phone made both reminders, and one is checked off.
+      assert.equal((await report([{ week, id: "c1", reminderId: "x" }, { week: "nope", id: "c1" }])).status, 400);
+      const reported = await report([
+        { week, id: "c1", reminderId: "REM-1", done: false },
+        { week, id: "c3", reminderId: "REM-3", done: true, completedAt: "2026-11-25T14:00:00Z" },
+        { week, id: "c9", reminderId: "REM-9", done: true }
+      ]);
+      assert.deepEqual(reported.body, { updated: 2 }, "a commitment the site never sent is skipped");
+      assert.deepEqual((await site("GET")).body.items, [
+        { id: "c1", active: true, reminder: true, done: false, completedAt: null },
+        { id: "c3", active: true, reminder: true, done: true, completedAt: "2026-11-25T14:00:00.000Z" }
+      ]);
+
+      // Un-accepted, or the week scored: the row stays, inactive, so the phone
+      // can remove the reminder; accepting it again brings it back.
+      await site("PUT", { items: [items[1]] });
+      assert.equal(app.pushes.length, before + 2);
+      assert.deepEqual((await synced()).map((c) => [c.id, c.active, c.reminderId]), [["c1", false, "REM-1"], ["c3", true, "REM-3"]]);
+      await report([{ week, id: "c1", reminderId: null, done: false }]);
+      await site("PUT", { items: [{ ...items[0], text: "Hit 140 g protein on 5 days" }, items[1]] });
+      assert.deepEqual((await synced())[0], {
+        week, id: "c1", text: "Hit 140 g protein on 5 days", measure: "Macrovana: 6 Complete days", area: "nutrition",
+        active: true, reminderId: null, done: false, due: sunday
+      });
+
+      // A week from long ago is no longer sent to the phone.
+      await site("PUT", { items }, "/api/commitments?week=2026-01-05");
+      assert.equal((await synced()).length, 2);
+      assert.equal((await site("GET", undefined, "/api/commitments?week=2026-01-05")).body.items.length, 2);
+      await site("PUT", { items: [] });
+      await site("PUT", { items: [] }, "/api/commitments?week=2026-01-05");
     });
   });
 }
@@ -498,6 +577,19 @@ if (databaseURL) {
 }
 
 describe("configuration", () => {
+  test("commitments are off unless both the token hash and the account are set", async () => {
+    for (const extra of [{ COMMITMENTS_TOKEN_SHA256: "" }, { COMMITMENTS_EMAIL: "" }]) {
+      const app = await start(new MemoryStore(), baseEnv(extra));
+      await app.signIn();
+      assert.equal((await app.call("GET", "/api/commitments?week=2026-11-23", { token: REVIEW_TOKEN })).status, 404);
+      await app.close();
+    }
+    assert.throws(() => loadConfig(baseEnv({ COMMITMENTS_TOKEN_SHA256: "not-a-hash" })), /COMMITMENTS_TOKEN_SHA256/);
+    // Before the owner has signed in there is no account to hold them.
+    const app = await start(new MemoryStore());
+    assert.equal((await app.call("GET", "/api/commitments?week=2026-11-23", { token: REVIEW_TOKEN })).status, 409);
+    await app.close();
+  });
   test("production requires a database, an allow-list and the agent ids", () => {
     const prod = { ...baseEnv(), NODE_ENV: "production", DATABASE_URL: "postgresql://x" };
     assert.doesNotThrow(() => loadConfig(prod));

@@ -133,6 +133,74 @@ struct PendingOp: Decodable, Identifiable, Equatable, Sendable {
 struct SyncResponse: Decodable, Sendable {
     var threads: [ThreadSummary]
     var ops: [PendingOp]
+    /// Absent from a server that predates commitments.
+    var commitments: [Commitment]?
+}
+
+// MARK: Commitments from the weekly review
+
+/// An action the owner accepted on the weekly review site for one week. The
+/// phone keeps a reminder for each active one and tells the server whether it
+/// is checked off, which the next review uses to score it.
+struct Commitment: Decodable, Equatable, Sendable {
+    /// The Monday of the week it is for, `YYYY-MM-DD`.
+    var week: String
+    var id: String
+    var text: String
+    var measure: String?
+    /// False once it is un-accepted or its week has been scored.
+    var active: Bool
+    /// The reminder some device already made for it.
+    var reminderId: String?
+    /// Whether the server already knows it as checked off.
+    var done: Bool
+    /// The Sunday that ends its week, `YYYY-MM-DD`.
+    var due: String
+}
+
+struct CommitmentReport: Encodable, Equatable, Sendable {
+    var week: String
+    var id: String
+    /// Nil once the reminder has been removed.
+    var reminderId: String?
+    var done: Bool
+    var completedAt: String?
+}
+
+struct CommitmentReports: Encodable, Sendable {
+    var items: [CommitmentReport]
+}
+
+enum CommitmentAction: Equatable {
+    case none
+    /// Make its reminder, or take up one already there.
+    case create
+    /// Take its reminder away: it is no longer wanted and was never done.
+    case remove
+    /// Tell the server the reminder was checked off, or un-checked.
+    case report(done: Bool)
+}
+
+enum CommitmentSync {
+    /// The list commitment reminders live in. It is made on first use and is
+    /// the phone's own: not one of the shared lists.
+    static let listTitle = "Weekly Commitments"
+
+    /// What to do about one commitment. `reminderCompleted` is the state of
+    /// its reminder on this phone, or nil when it has none here. A reminder id
+    /// the phone can't find is left alone: iCloud may not have delivered it yet.
+    static func action(for commitment: Commitment, reminderCompleted: Bool?) -> CommitmentAction {
+        guard commitment.reminderId != nil else { return commitment.active ? .create : .none }
+        guard let reminderCompleted else { return .none }
+        if !commitment.active, !reminderCompleted { return .remove }
+        return reminderCompleted == commitment.done ? .none : .report(done: reminderCompleted)
+    }
+
+    static func notes(for commitment: Commitment) -> String {
+        let source = "From your weekly review."
+        guard let measure = commitment.measure, !measure.isEmpty else { return source }
+        return "How it's judged: \(measure)\n\(source)"
+    }
 }
 
 /// The reminder as it is on this iPhone, sent along with each message.
